@@ -1,0 +1,24 @@
+﻿# Dependencies
+node_modules/
+miniapp/node_modules/
+
+# Build
+server.exe
+server2.exe
+web/admin/dist/
+web/dashboard/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Env
+.env

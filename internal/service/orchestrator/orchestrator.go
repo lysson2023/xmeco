@@ -1,0 +1,114 @@
+package orchestrator
+
+import (
+	"context"
+	_ "fmt"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Plan struct {
+	ID             int
+	Name           string
+	BuildingID     int
+	PrecheckOnline bool
+	PrecheckAlarm  bool
+}
+
+type Step struct {
+	SortOrder      int
+	DeviceID       int
+	DeviceName     string
+	Action         string
+	TargetValue    string
+	WaitSeconds    int
+	SkipIfOffline  bool
+}
+
+type Execution struct {
+	ID         int
+	PlanName   string
+	Status     string
+	TotalSteps int
+	DoneSteps  int
+	mu         sync.Mutex
+	pool       *pgxpool.Pool
+}
+
+func LoadPlan(ctx context.Context, pool *pgxpool.Pool, planID int) (*Plan, []Step, error) {
+	var p Plan
+	err := pool.QueryRow(ctx, `SELECT id,name,building_id,precheck_online,precheck_alarm FROM startup_plan WHERE id=$1`, planID).
+		Scan(&p.ID, &p.Name, &p.BuildingID, &p.PrecheckOnline, &p.PrecheckAlarm)
+	if err != nil { return nil, nil, err }
+
+	rows, err := pool.Query(ctx,
+		`SELECT ss.sort_order, ss.device_id, d.name, ss.action, ss.target_value, ss.wait_seconds, ss.skip_if_offline
+		 FROM startup_step ss JOIN device d ON d.id=ss.device_id
+		 WHERE ss.plan_id=$1 ORDER BY ss.sort_order`, planID)
+	if err != nil { return nil, nil, err }
+	defer rows.Close()
+	var steps []Step
+	for rows.Next() {
+		var s Step; rows.Scan(&s.SortOrder, &s.DeviceID, &s.DeviceName, &s.Action, &s.TargetValue, &s.WaitSeconds, &s.SkipIfOffline)
+		steps = append(steps, s)
+	}
+	return &p, steps, rows.Err()
+}
+
+func StartExecution(ctx context.Context, pool *pgxpool.Pool, planID int, planName, triggeredBy string, totalSteps int) (*Execution, error) {
+	var id int
+	err := pool.QueryRow(ctx,
+		`INSERT INTO startup_execution (plan_id,plan_name,triggered_by,status,total_steps,started_at) VALUES($1,$2,$3,'running',$4,$5) RETURNING id`,
+		planID, planName, triggeredBy, totalSteps, time.Now()).Scan(&id)
+	if err != nil { return nil, err }
+	return &Execution{ID: id, PlanName: planName, Status: "running", TotalSteps: totalSteps, pool: pool}, nil
+}
+
+func (e *Execution) LogStep(ctx context.Context, step Step, result, responseValue, errMsg string, durationMs int) {
+	e.mu.Lock()
+	if result == "success" || result == "skip" { e.DoneSteps++ } else if result == "error" { e.Status = "error" }
+	e.mu.Unlock()
+	_, err := e.pool.Exec(ctx,
+		`INSERT INTO startup_step_log (execution_id,step_order,device_name,action,target_value,result,response_value,duration_ms,error_message) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		e.ID, step.SortOrder, step.DeviceName, step.Action, step.TargetValue, result, responseValue, durationMs, errMsg)
+	if err != nil { slog.Warn("step log failed", "err", err) }
+}
+
+func (e *Execution) Finish(ctx context.Context) {
+	if e.Status == "running" { e.Status = "completed" }
+	e.pool.Exec(ctx, `UPDATE startup_execution SET status=$1,done_steps=$2,finished_at=$3 WHERE id=$4`,
+		e.Status, e.DoneSteps, time.Now(), e.ID)
+	slog.Info("execution finished", "plan", e.PlanName, "status", e.Status)
+}
+
+func (e *Execution) Run(ctx context.Context, steps []Step, execFn func(ctx context.Context, devID int, action, target string) (string, error)) {
+	defer e.Finish(ctx)
+	for _, step := range steps {
+		start := time.Now()
+		select {
+		case <-ctx.Done():
+			e.Status = "stopped"
+			return
+		default:
+		}
+		resp, err := execFn(ctx, step.DeviceID, step.Action, step.TargetValue)
+		ms := int(time.Since(start).Milliseconds())
+		if err != nil {
+			e.LogStep(ctx, step, "error", "", err.Error(), ms)
+			return
+		}
+		e.LogStep(ctx, step, "success", resp, "", ms)
+		if step.WaitSeconds > 0 {
+			select {
+			case <-time.After(time.Duration(step.WaitSeconds) * time.Second):
+			case <-ctx.Done():
+				e.Status = "stopped"
+				return
+			}
+		}
+	}
+}
+

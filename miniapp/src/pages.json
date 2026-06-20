@@ -1,0 +1,20 @@
+﻿{
+  "pages": [
+    { "path": "pages/index/index", "style": { "navigationBarTitleText": "XMECO" } },
+    { "path": "pages/login/login", "style": { "navigationBarTitleText": "Login" } },
+    { "path": "pages/devices/devices", "style": { "navigationBarTitleText": "Devices" } },
+    { "path": "pages/detail/detail", "style": { "navigationBarTitleText": "Detail" } },
+    { "path": "pages/alarms/alarms", "style": { "navigationBarTitleText": "Alarms" } },
+    { "path": "pages/mine/mine", "style": { "navigationBarTitleText": "Mine" } }
+  ],
+  "tabBar": {
+    "color": "#999", "selectedColor": "#006875",
+    "list": [
+      { "pagePath": "pages/index/index", "text": "Home", "iconPath": "static/home.png", "selectedIconPath": "static/home-active.png" },
+      { "pagePath": "pages/devices/devices", "text": "Devices", "iconPath": "static/device.png", "selectedIconPath": "static/device-active.png" },
+      { "pagePath": "pages/alarms/alarms", "text": "Alarms", "iconPath": "static/alarm.png", "selectedIconPath": "static/alarm-active.png" },
+      { "pagePath": "pages/mine/mine", "text": "Mine", "iconPath": "static/mine.png", "selectedIconPath": "static/mine-active.png" }
+    ]
+  },
+  "globalStyle": { "navigationBarBackgroundColor": "#006875", "navigationBarTextStyle": "white" }
+}

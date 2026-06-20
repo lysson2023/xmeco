@@ -1,0 +1,129 @@
+﻿package handler
+
+import (
+	"encoding/csv"
+	"fmt"
+	"net/http"
+	"time"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type LogHandler struct{ pool *pgxpool.Pool }
+func NewLogHandler(pool *pgxpool.Pool) *LogHandler { return &LogHandler{pool} }
+
+func (h *LogHandler) Telemetry(w http.ResponseWriter, r *http.Request) {
+	deviceID := queryInt(r, "device_id")
+	metric := r.URL.Query().Get("metric") // empty = all
+	interval := r.URL.Query().Get("interval") // hour, day, month, year
+	start := r.URL.Query().Get("start")
+	end := r.URL.Query().Get("end")
+	if end == "" { end = time.Now().Format("2006-01-02 15:04:05") }
+	if start == "" { start = time.Now().AddDate(0, -1, 0).Format("2006-01-02") }
+	export := r.URL.Query().Get("export") == "csv"
+
+	query := ""
+	args := []interface{}{}
+	argIdx := 1
+
+	if interval != "" && interval != "raw" {
+		trunc := map[string]string{"hour":"hour","day":"day","month":"month","year":"year"}[interval]
+		if trunc == "" { trunc = "day" }
+		query = "SELECT date_trunc($1, ts) as ts, metric, AVG(value)::numeric(10,2) as avg_val, MAX(value)::numeric(10,2) as max_val, MIN(value)::numeric(10,2) as min_val, COUNT(*)::int as cnt FROM device_telemetry WHERE ts>=$2 AND ts<=$3"
+		args = append(args, trunc, start, end)
+		argIdx = 4
+	} else {
+		query = "SELECT ts, metric, value, unit FROM device_telemetry WHERE ts>=$1 AND ts<=$2"
+		args = append(args, start, end)
+		argIdx = 3
+	}
+	if deviceID > 0 { query += " AND device_id=$"+itos(argIdx); args = append(args, deviceID); argIdx++ }
+	if metric != "" { query += " AND metric=$"+itos(argIdx); args = append(args, metric); argIdx++ }
+	if interval != "" && interval != "raw" {
+		query += " GROUP BY date_trunc($1, ts), metric ORDER BY date_trunc($1, ts) DESC, metric"
+	} else {
+		query += " ORDER BY ts DESC LIMIT 5000"
+	}
+
+	rows, err := h.pool.Query(r.Context(), query, args...)
+	if err != nil { serverErr(w, err); return }
+	defer rows.Close()
+
+	if export {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=telemetry_"+time.Now().Format("20060102")+".csv")
+		wr := csv.NewWriter(w)
+		if interval != "" && interval != "raw" {
+			wr.Write([]string{"时间","指标","平均值","最大值","最小值","记录数"})
+			for rows.Next() { var ts time.Time; var m string; var av,mx,mn float64; var c int; rows.Scan(&ts,&m,&av,&mx,&mn,&c); wr.Write([]string{ts.Format("2006-01-02 15:04:05"),m,ftoa(av),ftoa(mx),ftoa(mn),itos(c)}) }
+		} else {
+			wr.Write([]string{"时间","指标","值","单位"})
+			for rows.Next() { var ts time.Time; var m,u string; var v float64; rows.Scan(&ts,&m,&v,&u); wr.Write([]string{ts.Format("2006-01-02 15:04:05"),m,ftoa(v),u}) }
+		}
+		wr.Flush()
+		return
+	}
+
+	var list []map[string]interface{}
+	for rows.Next() {
+		if interval != "" && interval != "raw" {
+			var ts time.Time; var m string; var av,mx,mn float64; var c int
+			rows.Scan(&ts,&m,&av,&mx,&mn,&c)
+			list = append(list, map[string]interface{}{"ts":ts,"metric":m,"avg":av,"max":mx,"min":mn,"count":c})
+		} else {
+			var ts time.Time; var m,u string; var v float64
+			rows.Scan(&ts,&m,&v,&u)
+			list = append(list, map[string]interface{}{"ts":ts,"metric":m,"value":v,"unit":u})
+		}
+	}
+	if list == nil { list = []map[string]interface{}{} }
+	ok(w, list)
+}
+
+func (h *LogHandler) Controls(w http.ResponseWriter, r *http.Request) {
+	start := r.URL.Query().Get("start")
+	end := r.URL.Query().Get("end")
+	if end == "" { end = time.Now().Format("2006-01-02 15:04:05") }
+	if start == "" { start = time.Now().AddDate(0, -1, 0).Format("2006-01-02") }
+	export := r.URL.Query().Get("export") == "csv"
+
+	rows, err := h.pool.Query(r.Context(), "SELECT created_at,project_name,building_name,device_name,prop_name,control_value,username,user_remark FROM control_record WHERE created_at>=$1 AND created_at<=$2 ORDER BY created_at DESC LIMIT 1000", start, end)
+	if err != nil { serverErr(w, err); return }
+	defer rows.Close()
+
+	if export {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=controls_"+time.Now().Format("20060102")+".csv")
+		wr := csv.NewWriter(w)
+		wr.Write([]string{"时间","项目","楼宇","设备","属性","操作值","操作人","备注"})
+		for rows.Next() { var ts time.Time; var pn,bn,dn,pn2,cv,un,rm string; rows.Scan(&ts,&pn,&bn,&dn,&pn2,&cv,&un,&rm); wr.Write([]string{ts.Format("2006-01-02 15:04:05"),pn,bn,dn,pn2,cv,un,rm}) }
+		wr.Flush()
+		return
+	}
+
+	type ctrl struct{ Ts time.Time; Proj,Bld,Dev,Prop,Val,User,Remark string }
+	var list []ctrl
+	for rows.Next() { var c ctrl; rows.Scan(&c.Ts,&c.Proj,&c.Bld,&c.Dev,&c.Prop,&c.Val,&c.User,&c.Remark); list = append(list, c) }
+	if list == nil { list = []ctrl{} }
+	ok(w, list)
+}
+
+func (h *LogHandler) Stats(w http.ResponseWriter, r *http.Request) {
+	deviceID := queryInt(r, "device_id")
+	start := r.URL.Query().Get("start")
+	end := r.URL.Query().Get("end")
+	if end == "" { end = time.Now().Format("2006-01-02 15:04:05") }
+	if start == "" { start = time.Now().AddDate(0, -1, 0).Format("2006-01-02") }
+
+	rows, err := h.pool.Query(r.Context(), "SELECT metric,COUNT(*)::int as cnt,AVG(value)::numeric(10,2),SUM(value)::numeric(10,2),MAX(value)::numeric(10,2),MIN(value)::numeric(10,2) FROM device_telemetry WHERE ts>=$1 AND ts<=$2 AND ($3=0 OR device_id=$3) GROUP BY metric ORDER BY metric", start, end, deviceID)
+	if err != nil { serverErr(w, err); return }
+	defer rows.Close()
+	type stat struct{ Metric string; Count int; Avg,Sum,Max,Min float64 }
+	var list []stat
+	for rows.Next() { var s stat; rows.Scan(&s.Metric,&s.Count,&s.Avg,&s.Sum,&s.Max,&s.Min); list = append(list, s) }
+	if list == nil { list = []stat{} }
+	ok(w, list)
+}
+
+// helpers
+func itos(i int) string { return fmt.Sprint(i) }
+func ftoa(f float64) string { return fmt.Sprintf("%.2f", f) }
