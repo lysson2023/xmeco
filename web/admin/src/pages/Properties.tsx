@@ -1,6 +1,7 @@
-﻿import { useEffect, useState } from 'react';
+﻿import { useEffect, useState, useRef } from 'react';
 import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, Switch } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 
 const OP_TYPES = ['只读', '数值', '模式选择', '开关机'];
@@ -14,26 +15,33 @@ export default function Properties() {
   const [allBuildings, setAllBuildings] = useState<any[]>([]);
   const [buildings, setBuildings] = useState<any[]>([]);
   const [devices, setDevices] = useState<any[]>([]);
+  const [allRegisters, setAllRegisters] = useState<any[]>([]);
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
   const [selectedBuilding, setSelectedBuilding] = useState<number | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<number | null>(null);
   const [form] = Form.useForm();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mounted = useRef(false);
+  const restoring = useRef(false);
 
   useEffect(() => { api.get('/projects').then(r => setProjects(r.data)); }, []);
   useEffect(() => { api.get('/buildings').then(r => setAllBuildings(r.data)); }, []);
+  useEffect(() => { api.get('/registers').then(r => setAllRegisters(r.data)); }, []);
 
   useEffect(() => {
     if (selectedProject) {
       setBuildings(allBuildings.filter((b: any) => Number(b.project_id) === Number(selectedProject)));
-      setSelectedBuilding(null);
-      setSelectedDevice(null);
+      if (!restoring.current) {
+        setSelectedBuilding(null);
+        setSelectedDevice(null);
+      }
     } else { setBuildings([]); setSelectedBuilding(null); setSelectedDevice(null); }
   }, [selectedProject, allBuildings]);
 
   useEffect(() => {
     if (selectedBuilding) {
       api.get('/devices?building_id='+selectedBuilding).then(r => setDevices(r.data));
-      setSelectedDevice(null);
+      if (!restoring.current) setSelectedDevice(null);
     } else { setDevices([]); setSelectedDevice(null); }
   }, [selectedBuilding]);
 
@@ -41,8 +49,57 @@ export default function Properties() {
     if (selectedDevice) {
       setLoading(true);
       api.get('/properties?device_id='+selectedDevice).then(r => { setData(r.data); setLoading(false); });
+      restoring.current = false;  // cascade done, release flag
     } else { setData([]); }
   }, [selectedDevice]);
+
+  // Read device_id from URL on initial load and cascade restore
+  useEffect(() => {
+    const did = searchParams.get('device_id');
+    if (did && allBuildings.length > 0) {
+      api.get('/devices?building_id=0').then(r => {
+        const allDevs = r.data;
+        const dev = allDevs.find((d: any) => Number(d.id) === Number(did));
+        if (!dev) return;
+        const bld = allBuildings.find((b: any) => Number(b.id) === Number(dev.building_id));
+        if (!bld) return;
+        restoring.current = true;
+        setSelectedProject(Number(bld.project_id));
+        setSelectedBuilding(Number(dev.building_id));
+        setSelectedDevice(Number(did));
+      });
+    }
+  }, [searchParams, allBuildings]);
+
+  // Sync selectedDevice to URL
+  useEffect(() => {
+    if (selectedDevice) {
+      setSearchParams({ device_id: String(selectedDevice) });
+    } else if (mounted.current) {
+      setSearchParams({});
+    }
+    mounted.current = true;
+  }, [selectedDevice]);
+
+  const getDeviceName = (deviceId: number) =>
+    devices.find((d: any) => Number(d.id) === deviceId)?.name || '-';
+
+  const getBldName = (deviceId: number) => {
+    const dev = devices.find((d: any) => Number(d.id) === deviceId);
+    if (!dev) return '-';
+    return allBuildings.find((b: any) => Number(b.id) === Number(dev.building_id))?.name || '-';
+  };
+
+  const getProjName = (deviceId: number) => {
+    const dev = devices.find((d: any) => Number(d.id) === deviceId);
+    if (!dev) return '-';
+    const bld = allBuildings.find((b: any) => Number(b.id) === Number(dev.building_id));
+    if (!bld) return '-';
+    return projects.find((p: any) => Number(p.id) === Number(bld.project_id))?.name || '-';
+  };
+
+  const registerCount = (propId: number) =>
+    allRegisters.filter((r: any) => Number(r.property_id) === propId).length;
 
   const save = async (v: any) => {
     const payload = { ...v, device_id: selectedDevice, is_key: v.is_key || false };
@@ -59,13 +116,18 @@ export default function Properties() {
   const cols = [
     { title: 'ID', dataIndex: 'id', width: 45 },
     { title: '属性名', dataIndex: 'prop_name', width: 120 },
-    { title: '属性值', dataIndex: 'prop_value', width: 90, render: (v: string) => v || '-' },
-    { title: '单位', dataIndex: 'unit', width: 60, render: (v: string) => v || '-' },
-    { title: '操作类型', dataIndex: 'operation_type', width: 90 },
-    { title: '最小值', dataIndex: 'min_value', width: 70, render: (v: string) => v || '-' },
-    { title: '最大值', dataIndex: 'max_value', width: 70, render: (v: string) => v || '-' },
+    { title: '所属设备', dataIndex: 'device_id', width: 100, render: (v: number) => getDeviceName(v) },
+    { title: '所属楼宇', dataIndex: 'device_id', width: 100, render: (v: number) => getBldName(v) },
+    { title: '所属项目', dataIndex: 'device_id', width: 100, render: (v: number) => getProjName(v) },
+    { title: '属性值', dataIndex: 'prop_value', width: 80, render: (v: string) => v || '-' },
+    { title: '单位', dataIndex: 'unit', width: 55, render: (v: string) => v || '-' },
+    { title: '操作类型', dataIndex: 'operation_type', width: 85 },
+    { title: '寄存器', width: 65, render: (_: any, r: any) => {
+      const n = registerCount(r.id);
+      return n > 0 ? <span style={{fontWeight:500,color:'#006875'}}>{n}</span> : <span style={{color:'#999'}}>0</span>;
+    }},
     { title: '关键属性', dataIndex: 'is_key', width: 80, render: (v: boolean) => v ? '是' : '否' },
-    { title: '简称', dataIndex: 'prop_short', width: 80, render: (v: string) => v || '-' },
+    { title: '简称', dataIndex: 'prop_short', width: 70, render: (v: string) => v || '-' },
     { title: '操作', width: 100, render: (_: any, r: any) => (
       <Space>
         <a onClick={() => { setEditing(r); form.setFieldsValue(r); setModalOpen(true); }}>编辑</a>

@@ -3,6 +3,7 @@
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -22,7 +23,10 @@ func (il *Interlock) Check(ctx context.Context, targetDeviceID int, action strin
 
 	for rows.Next() {
 		var checkDevID int; var propName, expected, msg, devName string
-		rows.Scan(&checkDevID, &propName, &expected, &msg, &devName)
+		if err := rows.Scan(&checkDevID, &propName, &expected, &msg, &devName); err != nil {
+			slog.Warn("interlock check scan failed", "target_dev", targetDeviceID, "action", action, "err", err)
+			continue
+		}
 
 		var actual string
 		err := il.pool.QueryRow(ctx,

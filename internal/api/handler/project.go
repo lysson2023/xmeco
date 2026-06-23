@@ -35,7 +35,7 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.Create(r.Context(), &p); err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		writeJSON(w, http.StatusConflict, M{"error": "项目创建失败"})
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
@@ -58,7 +58,7 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	p.ID = pathLast(r.URL.Path)
 	if err := h.repo.Update(r.Context(), &p); err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, M{"error": "项目更新失败"})
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
@@ -66,7 +66,7 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.Delete(r.Context(), pathLast(r.URL.Path)); err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, M{"error": "项目删除失败"})
 		return
 	}
 	writeJSON(w, http.StatusOK, M{"status": "deleted"})

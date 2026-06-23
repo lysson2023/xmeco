@@ -57,9 +57,10 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		RoleID   int   `json:"role_id"`
-		AgentID  *int  `json:"agent_id"`
-		IsActive *bool `json:"is_active"`
+		RoleID   int    `json:"role_id"`
+		AgentID  *int   `json:"agent_id"`
+		IsActive *bool  `json:"is_active"`
+		Remark   *string `json:"remark"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
@@ -70,8 +71,8 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	if body.IsActive != nil {
 		isActive = *body.IsActive
 	}
-	if err := h.repo.UpdateUser(r.Context(), id, body.RoleID, body.AgentID, isActive); err != nil {
-		writeJSON(w, http.StatusNotFound, M{"error": "用户不存在"})
+	if err := h.repo.UpdateUser(r.Context(), id, body.RoleID, body.AgentID, isActive, body.Remark); err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "更新失败"})
 		return
 	}
 	ok(w, M{"status": "updated"})
@@ -90,7 +91,7 @@ func (h *AdminHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		serverErr(w, err)
 		return
 	}
-	if err := h.repo.ResetPassword(r.Context(), pathLast(r.URL.Path), hash); err != nil {
+	if err := h.repo.ResetPassword(r.Context(), pathID(r.URL.Path), hash); err != nil {
 		writeJSON(w, http.StatusNotFound, M{"error": "用户不存在"})
 		return
 	}
@@ -193,7 +194,7 @@ func (h *AdminHandler) GetRolePermissions(w http.ResponseWriter, r *http.Request
 	if ids == nil {
 		ids = []int{}
 	}
-	ok(w, map[string]interface{}{"role_id": pathLast(r.URL.Path), "perm_ids": ids})
+	ok(w, map[string]any{"role_id": pathLast(r.URL.Path), "perm_ids": ids})
 }
 
 func (h *AdminHandler) SetRolePermissions(w http.ResponseWriter, r *http.Request) {
@@ -209,4 +210,24 @@ func (h *AdminHandler) SetRolePermissions(w http.ResponseWriter, r *http.Request
 		return
 	}
 	ok(w, M{"status": "updated"})
+}
+
+// SystemInfo returns basic system information. Requires system.config.
+func (h *AdminHandler) SystemInfo(w http.ResponseWriter, r *http.Request) {
+	info, err := h.repo.SystemInfo(r.Context())
+	if err != nil {
+		serverErr(w, err)
+		return
+	}
+	ok(w, info)
+}
+
+// DBStats returns database statistics. Requires system.db.
+func (h *AdminHandler) DBStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.repo.DBStats(r.Context())
+	if err != nil {
+		serverErr(w, err)
+		return
+	}
+	ok(w, stats)
 }

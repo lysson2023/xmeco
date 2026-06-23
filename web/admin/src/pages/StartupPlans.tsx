@@ -1,6 +1,7 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, Row, Col, InputNumber, Tag } from 'antd';
 import { PlusOutlined, DeleteOutlined, ArrowUpOutlined, ArrowDownOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 
 export default function StartupPlans() {
@@ -17,19 +18,46 @@ export default function StartupPlans() {
   const [planType, setPlanType] = useState<string>('startup');
   const [steps, setSteps] = useState<any[]>([]);
   const [form] = Form.useForm();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mounted = useRef(false);
+  const restoring = useRef(false);
 
-  useEffect(() => { api.get('/projects').then(r=>setProjects(r.data)); api.get('/buildings').then(r=>setAllBuildings(r.data)); }, []);
+  useEffect(() => { api.get('/projects').then(r=>setProjects(r.data)); api.get('/buildings').then(r => {
+    setAllBuildings(r.data);
+    const bid = searchParams.get('building_id');
+    if (bid) {
+      const bld = r.data.find((b: any) => Number(b.id) === Number(bid));
+      if (bld) {
+        restoring.current = true;
+        setSelProject(Number(bld.project_id));
+        setSelBuilding(Number(bid));
+      }
+    }
+  }); }, []);
 
   useEffect(() => {
-    if(selProject){setBuildings(allBuildings.filter((b:any)=>Number(b.project_id)===Number(selProject)));setSelBuilding(null);}
+    if(selProject){setBuildings(allBuildings.filter((b:any)=>Number(b.project_id)===Number(selProject))); if (!restoring.current) setSelBuilding(null);}
     else{setBuildings([]);setSelBuilding(null);setPlans([]);}
   }, [selProject]);
   useEffect(() => {
-    if(selBuilding){setLoading(true);api.get('/startup-plans?building_id='+selBuilding).then(r=>{setPlans(r.data);setLoading(false);});api.get('/devices?building_id='+selBuilding).then(r=>setDevices(r.data));}
+    if(selBuilding){setLoading(true);api.get('/startup-plans?building_id='+selBuilding).then(r=>{setPlans(r.data);setLoading(false); restoring.current = false;});api.get('/devices?building_id='+selBuilding).then(r=>setDevices(r.data));}
     else{setPlans([]);setDevices([]);}
   }, [selBuilding]);
 
-  const addStep = () => { setSteps([...steps, { device_id: devices[0]?.id||0, device_name: devices[0]?.name||'', wait_seconds: 20, sort_order: steps.length+1 }]); };
+  useEffect(() => {
+    if (selBuilding) setSearchParams({ building_id: String(selBuilding) });
+    else if (mounted.current) setSearchParams({});
+    mounted.current = true;
+  }, [selBuilding]);
+
+  const getBldName = (bid: number) => allBuildings.find((b:any)=>Number(b.id)===bid)?.name||'-';
+  const getProjName = (bid: number) => {
+    const bld = allBuildings.find((b:any)=>Number(b.id)===bid);
+    if (!bld) return '-';
+    return projects.find((p:any)=>Number(p.id)===Number(bld.project_id))?.name||'-';
+  };
+
+  const addStep = () => { setSteps([...steps, { device_id: devices[0]?.id||0, device_name: devices[0]?.name||'', wait_seconds: 20, retry_count: 1, sort_order: steps.length+1 }]); };
   const removeStep = (idx: number) => { setSteps(steps.filter((_,i)=>i!==idx).map((s,i)=>({...s,sort_order:i+1}))); };
   const moveStep = (idx: number, dir: number) => {
     var ns = [...steps]; var ti = idx+dir; if(ti<0||ti>=ns.length) return;
@@ -40,8 +68,8 @@ export default function StartupPlans() {
     var v = form.getFieldsValue();
     if(!v.name||!selBuilding||steps.length===0){message.warning('请填写名称并添加至少一个步骤');return;}
     var p: any = { name: v.name, building_id: selBuilding, plan_type: planType,
-      steps: steps.map((s,i)=>({device_id:s.device_id,sort_order:i+1,wait_seconds:s.wait_seconds,action:planType})) };
-    if(editing){ await api.put('/startup-plans/'+editing.ID, p); message.success('更新成功'); }
+      steps: steps.map((s,i)=>({device_id:s.device_id,sort_order:i+1,wait_seconds:s.wait_seconds,retry_count:s.retry_count||1,action:planType})) };
+    if(editing){ await api.put('/startup-plans/'+editing.id, p); message.success('更新成功'); }
     else { await api.post('/startup-plans', p); message.success('创建成功'); }
     setModalOpen(false); setEditing(null); setSteps([]); form.resetFields();
     if(selBuilding) api.get('/startup-plans?building_id='+selBuilding).then(r=>setPlans(r.data));
@@ -51,19 +79,21 @@ export default function StartupPlans() {
   const execute = async (id: number) => { await api.post('/startup-plans/'+id+'/execute'); message.success('已执行'); };
 
   const cols = [
-    { title: 'ID', dataIndex: 'ID', width: 40 },
-    { title: '名称', dataIndex: 'Name', width: 130 },
-    { title: '类型', dataIndex: 'PlanType', width: 70, render: (v:string)=><Tag color={v==='startup'?'green':'red'}>{v==='startup'?'启动':'停止'}</Tag> },
-    { title: '步骤', dataIndex: 'Steps', width: 300, render: (v:any)=>{
+    { title: 'ID', dataIndex: 'id', width: 40 },
+    { title: '名称', dataIndex: 'name', width: 130 },
+    { title: '所属项目', dataIndex: 'building_id', width: 100, render: (v:number) => getProjName(v) },
+    { title: '所属楼宇', dataIndex: 'building_id', width: 100, render: (v:number) => getBldName(v) },
+    { title: '类型', dataIndex: 'plan_type', width: 70, render: (v:string)=><Tag color={v==='startup'?'green':'red'}>{v==='startup'?'启动':'停止'}</Tag> },
+    { title: '步骤', dataIndex: 'steps', width: 300, render: (v:any)=>{
       if(!v||!Array.isArray(v)) return '-';
       try{var s=typeof v==='string'?JSON.parse(v):v; return s.map((x:any,i:number)=><span key={i}>{x.device_name||x.device_id}{i<s.length-1?' → ':''}</span>)}
       catch(e){return '-'}
     }},
     { title: '操作', width: 150, render: (_:any,r:any)=>(<Space size="small">
-      <a onClick={()=>{setEditing(r);form.setFieldsValue(r);setPlanType(r.PlanType||'startup');
-        var s=typeof r.Steps==='string'?JSON.parse(r.Steps||'[]'):(r.Steps||[]);setSteps(s.map((x:any,i:number)=>({device_id:x.device_id,device_name:x.device_name,wait_seconds:x.wait_seconds||20,sort_order:i+1})));setModalOpen(true);}}>编辑</a>
-      <a onClick={()=>execute(r.ID)}><PlayCircleOutlined/>执行</a>
-      <Popconfirm title="确定?" onConfirm={()=>del(r.ID)}><a style={{color:'red'}}>删除</a></Popconfirm>
+      <a onClick={()=>{setEditing(r);form.setFieldsValue(r);setPlanType(r.plan_type||'startup');
+        var s=typeof r.steps==='string'?JSON.parse(r.steps||'[]'):(r.steps||[]);setSteps(s.map((x:any,i:number)=>({device_id:x.device_id,device_name:x.device_name,wait_seconds:x.wait_seconds||20,retry_count:x.retry_count||1,sort_order:i+1})));setModalOpen(true);}}>编辑</a>
+      <a onClick={()=>execute(r.id)}><PlayCircleOutlined/>执行</a>
+      <Popconfirm title="确定?" onConfirm={()=>del(r.id)}><a style={{color:'red'}}>删除</a></Popconfirm>
     </Space>)},
   ];
 
@@ -76,7 +106,7 @@ export default function StartupPlans() {
         <div><div style={{marginBottom:2,color:'#666',fontSize:11}}>楼宇</div><Select style={{width:180}} placeholder="楼宇" allowClear value={selBuilding} disabled={!selProject} onChange={v=>setSelBuilding(v?Number(v):null)} options={buildings.map(b=>({value:b.id,label:b.name}))}/></div>
         {selBuilding && <span style={{paddingBottom:2,color:'#006875',fontWeight:500}}>共{plans.length}个方案</span>}
       </div>
-      <Table rowKey="ID" columns={cols} dataSource={plans} loading={loading} scroll={{x:850}} size="small"
+      <Table rowKey="id" columns={cols} dataSource={plans} loading={loading} scroll={{x:950}} size="small"
         locale={{emptyText:selBuilding?'暂无方案':'请先选择项目和楼宇'}}/>
       <Modal title={editing?'编辑':'新增'} width={700} open={modalOpen} onOk={save} onCancel={()=>{setModalOpen(false);setSteps([]);}}>
         <Form form={form} layout="vertical" initialValues={{plan_type:'startup'}}>

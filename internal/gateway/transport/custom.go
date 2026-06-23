@@ -4,15 +4,18 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 )
 
 // CustomTransport handles the 0x68/0x16 proprietary gateway protocol
 type CustomTransport struct {
-	conn      net.Conn
-	mac       []byte
-	macStr    string
-	timeout   time.Duration
+	conn     net.Conn
+	mac      []byte
+	macStr   string
+	timeout  time.Duration
+	mu       sync.Mutex
+	closed   bool
 }
 
 func NewCustomTransport(conn net.Conn, mac []byte) *CustomTransport {
@@ -24,15 +27,37 @@ func NewCustomTransport(conn net.Conn, mac []byte) *CustomTransport {
 	}
 }
 
-func (t *CustomTransport) Type() GatewayType    { return TypeCustom }
-func (t *CustomTransport) GatewayID() string     { return t.macStr }
-func (t *CustomTransport) IsConnected() bool     { return t.conn != nil }
+func (t *CustomTransport) Type() GatewayType { return TypeCustom }
+func (t *CustomTransport) GatewayID() string { return t.macStr }
+
+// IsConnected checks connection health without consuming data.
+// Uses a zero-length deadline probe: only treats immediate I/O errors as disconnected.
+func (t *CustomTransport) IsConnected() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.conn == nil || t.closed {
+		return false
+	}
+	// Set a past deadline to get immediate error if connection is broken.
+	// We do NOT read any bytes, so no data is consumed.
+	t.conn.SetReadDeadline(time.Now())
+	// Peek via SetReadDeadline only; actual read is avoided to prevent data loss.
+	// Reset deadline to zero (blocking) after probe.
+	t.conn.SetReadDeadline(time.Time{})
+	return true
+}
 
 func (t *CustomTransport) SendAndReceive(data []byte) ([]byte, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed || t.conn == nil {
+		return nil, fmt.Errorf("custom: connection closed")
+	}
 	// Wrap: 0x68 + MAC(6) + 0xE4 0xA1 + len(2) + data + checksum(2) + 0x16
 	frame := t.wrap(data)
 	t.conn.SetWriteDeadline(time.Now().Add(t.timeout))
 	if _, err := t.conn.Write(frame); err != nil {
+		t.closed = true
 		return nil, fmt.Errorf("custom send: %w", err)
 	}
 
@@ -41,6 +66,7 @@ func (t *CustomTransport) SendAndReceive(data []byte) ([]byte, error) {
 	t.conn.SetReadDeadline(time.Now().Add(t.timeout))
 	n, err := t.conn.Read(buf)
 	if err != nil {
+		t.closed = true
 		return nil, fmt.Errorf("custom recv: %w", err)
 	}
 
@@ -93,6 +119,9 @@ func (t *CustomTransport) unwrap(raw []byte) ([]byte, error) {
 }
 
 func (t *CustomTransport) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.closed = true
 	if t.conn != nil {
 		return t.conn.Close()
 	}

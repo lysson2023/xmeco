@@ -31,6 +31,7 @@ type Device struct {
 	RatedCurrent  *float64   `json:"rated_current"`
 	OnlineStatus  string     `json:"online_status"`
 	DeviceStatus  string     `json:"device_status"`
+	LastOnlineAt  *time.Time `json:"last_online_at"`
 	LastRecordAt  *time.Time `json:"last_record_at"`
 	CreatedAt     time.Time  `json:"created_at"`
 }

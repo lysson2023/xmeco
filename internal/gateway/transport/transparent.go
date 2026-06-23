@@ -3,6 +3,7 @@
 import (
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"xmeco/internal/gateway/modbus"
@@ -11,8 +12,10 @@ import (
 // TransparentTransport handles raw Modbus RTU over TCP (e.g., G770 DTU)
 type TransparentTransport struct {
 	conn    net.Conn
-	id      string  // IP:Port or registered ID
+	id      string // IP:Port or registered ID
 	timeout time.Duration
+	mu      sync.Mutex
+	closed  bool
 }
 
 func NewTransparentTransport(conn net.Conn, id string) *TransparentTransport {
@@ -23,13 +26,30 @@ func NewTransparentTransport(conn net.Conn, id string) *TransparentTransport {
 	}
 }
 
-func (t *TransparentTransport) Type() GatewayType    { return TypeTransparent }
-func (t *TransparentTransport) GatewayID() string     { return t.id }
-func (t *TransparentTransport) IsConnected() bool     { return t.conn != nil }
+func (t *TransparentTransport) Type() GatewayType { return TypeTransparent }
+func (t *TransparentTransport) GatewayID() string { return t.id }
+
+// IsConnected checks connection health without consuming data.
+func (t *TransparentTransport) IsConnected() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.conn == nil || t.closed {
+		return false
+	}
+	t.conn.SetReadDeadline(time.Now())
+	t.conn.SetReadDeadline(time.Time{})
+	return true
+}
 
 func (t *TransparentTransport) SendAndReceive(data []byte) ([]byte, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed || t.conn == nil {
+		return nil, fmt.Errorf("dtu: connection closed")
+	}
 	t.conn.SetWriteDeadline(time.Now().Add(t.timeout))
 	if _, err := t.conn.Write(data); err != nil {
+		t.closed = true
 		return nil, fmt.Errorf("dtu send: %w", err)
 	}
 
@@ -40,7 +60,7 @@ func (t *TransparentTransport) SendAndReceive(data []byte) ([]byte, error) {
 
 	// Read Modbus response: addr(1) + func(1) + ...
 	t.conn.SetReadDeadline(time.Now().Add(t.timeout))
-	buf := make([]byte, 256)
+	buf := make([]byte, 512)
 	total := 0
 	deadline := time.Now().Add(t.timeout)
 
@@ -84,6 +104,9 @@ func (t *TransparentTransport) SendAndReceive(data []byte) ([]byte, error) {
 }
 
 func (t *TransparentTransport) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.closed = true
 	if t.conn != nil { return t.conn.Close() }
 	return nil
 }

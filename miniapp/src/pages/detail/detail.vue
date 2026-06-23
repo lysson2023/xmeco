@@ -4,8 +4,8 @@
     <text class="pn">{{p.prop_name}}</text><text class="pv">{{p.prop_value}} {{p.unit}}</text>
   </view>
   <view class="controls">
-    <button class="ctrl on" @click="control('start')">Start</button>
-    <button class="ctrl off" @click="control('stop')">Stop</button>
+    <button class="ctrl on" @click="control('start')">启动</button>
+    <button class="ctrl off" @click="control('stop')">停止</button>
   </view>
 </view></template>
 <script setup lang="ts">
@@ -16,7 +16,7 @@ onMounted(async () => {
   const [d, p] = await Promise.all([api.get('/devices/'+id), api.get('/properties?device_id='+id)])
   dev.value = d.data as any; props.value = p.data as any
 })
-const control = async (a: string) => { await api.post('/devices/'+dev.value.id+'/control', { action: a }); uni.showToast({ title: 'OK' }) }
+const control = async (a: string) => { await api.post('/devices/'+dev.value.id+'/control', { action: a }); uni.showToast({ title: '已发送' }) }
 </script>
 <style>
 .detail { padding: 20rpx; }

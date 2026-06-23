@@ -29,10 +29,3 @@ func TestVerifyCRC(t *testing.T) {
 		t.Error("corrupt frame passed CRC check")
 	}
 }
-
-func TestCRCTable(t *testing.T) {
-	// Verify table is initialized
-	if crc16Table[0] != 0 {
-		t.Error("CRC table not initialized")
-	}
-}

@@ -97,3 +97,37 @@ func ParseResponse(raw []byte) ([]byte, bool) {
 	}
 	return nil, false
 }
+
+// CodeFromStr converts a hex code string to a Modbus function code byte.
+func CodeFromStr(s string) byte {
+	switch s {
+	case "01":
+		return 0x01
+	case "02":
+		return 0x02
+	case "03":
+		return 0x03
+	case "04":
+		return 0x04
+	case "05":
+		return 0x05
+	case "06":
+		return 0x06
+	case "10", "0F":
+		return 0x10
+	default:
+		return 0x06
+	}
+}
+
+// BuildWriteCommand builds a Modbus write command based on the function code.
+func BuildWriteCommand(devAddr byte, funcCode byte, addr uint16, count uint16) []byte {
+	switch funcCode {
+	case 0x05, 0x06:
+		return BuildWriteSingleCommand(devAddr, addr, 0xFF00)
+	case 0x10, 0x0F:
+		return BuildWriteMultiCommand(devAddr, addr, count, []byte{0xFF, 0x00})
+	default:
+		return BuildWriteSingleCommand(devAddr, addr, 0xFF00)
+	}
+}

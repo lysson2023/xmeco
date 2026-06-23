@@ -21,12 +21,17 @@ export default function Permissions() {
 
   const fetch = async () => {
     setLoading(true);
-    const [r, p] = await Promise.all([api.get('/roles'), api.get('/permissions')]);
-    setRoles(r.data); setPermissions(p.data);
-    if (r.data.length > 0 && !selectedRole) {
-      setSelectedRole(r.data[0].id);
+    try {
+      const [r, p] = await Promise.all([api.get('/roles'), api.get('/permissions')]);
+      setRoles(r.data); setPermissions(p.data);
+      if (r.data.length > 0 && !selectedRole) {
+        setSelectedRole(r.data[0].id);
+      }
+    } catch {
+      message.error('加载失败');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
   useEffect(() => { fetch(); }, []);
 
@@ -40,8 +45,12 @@ export default function Permissions() {
 
   const saveRolePerms = async () => {
     if (!selectedRole) return;
-    await api.put('/roles/'+selectedRole+'/permissions', { perm_ids: checkedPerms });
-    message.success('权限已保存');
+    try {
+      await api.put('/roles/'+selectedRole+'/permissions', { perm_ids: checkedPerms });
+      message.success('权限已保存');
+    } catch {
+      message.error('保存失败');
+    }
   };
 
   const groupedPerms: Record<string, Permission[]> = {};

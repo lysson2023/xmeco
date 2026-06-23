@@ -2,18 +2,30 @@
 
 import (
 	"context"
+	"log/slog"
+	"math"
 
 	"xmeco/internal/domain"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type AdminRepo struct {
-	pool *pgxpool.Pool
+	pool DBTX
 }
 
-func NewAdminRepo(pool *pgxpool.Pool) *AdminRepo {
+func NewAdminRepo(pool DBTX) *AdminRepo {
 	return &AdminRepo{pool: pool}
+}
+
+// SystemInfo returns basic system information (DB version).
+func (r *AdminRepo) SystemInfo(ctx context.Context) (map[string]any, error) {
+	var version string
+	if err := r.pool.QueryRow(ctx, `SELECT version()`).Scan(&version); err != nil {
+		version = "unknown"
+	}
+	return map[string]any{
+		"service":    "XMECO",
+		"db_version": version,
+	}, nil
 }
 
 // ==================== 用户 ====================
@@ -37,7 +49,8 @@ func (r *AdminRepo) ListUsers(ctx context.Context) ([]domain.AdminUser, error) {
 		if err := rows.Scan(&u.ID, &u.Username, &u.RoleID, &u.RoleCode, &u.RoleName,
 			&u.AgentID, &u.AgentName, &u.DefaultProjectID,
 			&u.IsActive, &u.LastLoginAt, &u.Remark, &u.CreatedAt); err != nil {
-			return nil, err
+			slog.Warn("AdminRepo.ListUsers scan failed", "err", err)
+			continue
 		}
 		users = append(users, u)
 	}
@@ -63,10 +76,15 @@ func (r *AdminRepo) CreateUser(ctx context.Context, req domain.CreateUserReq, pa
 	return &u, nil
 }
 
-func (r *AdminRepo) UpdateUser(ctx context.Context, id int, roleID int, agentID *int, isActive bool) error {
+func (r *AdminRepo) UpdateUser(ctx context.Context, id int, roleID int, agentID *int, isActive bool, remark *string) error {
 	_, err := r.pool.Exec(ctx, `
-		UPDATE users SET role_id=$1, agent_id=$2, is_active=$3 WHERE id=$4`,
-		roleID, agentID, isActive, id)
+		UPDATE users SET
+		  role_id = CASE WHEN $1 = 0 THEN role_id ELSE $1 END,
+		  agent_id = COALESCE($2, agent_id),
+		  is_active = $3,
+		  remark = COALESCE($4, remark)
+		WHERE id=$5`,
+		roleID, agentID, isActive, remark, id)
 	return err
 }
 
@@ -92,7 +110,8 @@ func (r *AdminRepo) ListAgents(ctx context.Context) ([]domain.Agent, error) {
 	for rows.Next() {
 		var a domain.Agent
 		if err := rows.Scan(&a.ID, &a.Name, &a.CreatedAt); err != nil {
-			return nil, err
+			slog.Warn("AdminRepo.ListAgents scan failed", "err", err)
+			continue
 		}
 		agents = append(agents, a)
 	}
@@ -132,7 +151,8 @@ func (r *AdminRepo) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	for rows.Next() {
 		var ro domain.Role
 		if err := rows.Scan(&ro.ID, &ro.Code, &ro.Name, &ro.Level, &ro.IsSystem); err != nil {
-			return nil, err
+			slog.Warn("AdminRepo.ListRoles scan failed", "err", err)
+			continue
 		}
 		roles = append(roles, ro)
 	}
@@ -149,7 +169,8 @@ func (r *AdminRepo) ListPermissions(ctx context.Context) ([]domain.Permission, e
 	for rows.Next() {
 		var p domain.Permission
 		if err := rows.Scan(&p.ID, &p.Code, &p.Name, &p.PermGroup); err != nil {
-			return nil, err
+			slog.Warn("AdminRepo.ListPermissions scan failed", "err", err)
+			continue
 		}
 		perms = append(perms, p)
 	}
@@ -188,4 +209,33 @@ func (r *AdminRepo) SetRolePermissions(ctx context.Context, roleID int, permIDs 
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// DBStats returns database-level statistics. Requires system.db.
+func (r *AdminRepo) DBStats(ctx context.Context) (map[string]any, error) {
+	var dbSize, connCount, tableCount, rowCount int64
+	if err := r.pool.QueryRow(ctx,
+		`SELECT pg_database_size(current_database())`).Scan(&dbSize); err != nil {
+		dbSize = 0
+	}
+	if err := r.pool.QueryRow(ctx,
+		`SELECT count(*) FROM pg_stat_activity WHERE datname=current_database()`).Scan(&connCount); err != nil {
+		connCount = 0
+	}
+	if err := r.pool.QueryRow(ctx,
+		`SELECT count(*) FROM information_schema.tables WHERE table_schema='public'`).Scan(&tableCount); err != nil {
+		tableCount = 0
+	}
+	if err := r.pool.QueryRow(ctx,
+		`SELECT sum(n_live_tup) FROM pg_stat_user_tables`).Scan(&rowCount); err != nil {
+		rowCount = 0
+	}
+	mb := float64(dbSize) / 1048576.0
+	return map[string]any{
+		"db_size_bytes": dbSize,
+		"db_size_mb":    math.Round(mb*100) / 100,
+		"connections":   connCount,
+		"table_count":   tableCount,
+		"row_count":     rowCount,
+	}, nil
 }

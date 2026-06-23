@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	_ "fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -26,6 +25,7 @@ type Step struct {
 	TargetValue    string
 	WaitSeconds    int
 	SkipIfOffline  bool
+	RetryCount     int
 }
 
 type Execution struct {
@@ -45,14 +45,18 @@ func LoadPlan(ctx context.Context, pool *pgxpool.Pool, planID int) (*Plan, []Ste
 	if err != nil { return nil, nil, err }
 
 	rows, err := pool.Query(ctx,
-		`SELECT ss.sort_order, ss.device_id, d.name, ss.action, ss.target_value, ss.wait_seconds, ss.skip_if_offline
+		`SELECT ss.sort_order, ss.device_id, d.name, ss.action, ss.target_value, ss.wait_seconds, ss.skip_if_offline, COALESCE(ss.retry_count,1)
 		 FROM startup_step ss JOIN device d ON d.id=ss.device_id
 		 WHERE ss.plan_id=$1 ORDER BY ss.sort_order`, planID)
 	if err != nil { return nil, nil, err }
 	defer rows.Close()
 	var steps []Step
 	for rows.Next() {
-		var s Step; rows.Scan(&s.SortOrder, &s.DeviceID, &s.DeviceName, &s.Action, &s.TargetValue, &s.WaitSeconds, &s.SkipIfOffline)
+		var s Step
+		if err := rows.Scan(&s.SortOrder, &s.DeviceID, &s.DeviceName, &s.Action, &s.TargetValue, &s.WaitSeconds, &s.SkipIfOffline, &s.RetryCount); err != nil {
+			slog.Warn("LoadPlan scan step failed", "plan", planID, "err", err)
+			continue
+		}
 		steps = append(steps, s)
 	}
 	return &p, steps, rows.Err()
@@ -79,33 +83,53 @@ func (e *Execution) LogStep(ctx context.Context, step Step, result, responseValu
 
 func (e *Execution) Finish(ctx context.Context) {
 	if e.Status == "running" { e.Status = "completed" }
-	e.pool.Exec(ctx, `UPDATE startup_execution SET status=$1,done_steps=$2,finished_at=$3 WHERE id=$4`,
-		e.Status, e.DoneSteps, time.Now(), e.ID)
+	if _, err := e.pool.Exec(ctx, `UPDATE startup_execution SET status=$1,done_steps=$2,finished_at=$3 WHERE id=$4`,
+		e.Status, e.DoneSteps, time.Now(), e.ID); err != nil {
+		slog.Warn("execution finish update failed", "exec", e.ID, "err", err)
+	}
 	slog.Info("execution finished", "plan", e.PlanName, "status", e.Status)
 }
 
 func (e *Execution) Run(ctx context.Context, steps []Step, execFn func(ctx context.Context, devID int, action, target string) (string, error)) {
 	defer e.Finish(ctx)
+	setStopped := func() {
+		e.mu.Lock()
+		e.Status = "stopped"
+		e.mu.Unlock()
+	}
 	for _, step := range steps {
-		start := time.Now()
 		select {
 		case <-ctx.Done():
-			e.Status = "stopped"
+			setStopped()
 			return
 		default:
 		}
-		resp, err := execFn(ctx, step.DeviceID, step.Action, step.TargetValue)
-		ms := int(time.Since(start).Milliseconds())
-		if err != nil {
-			e.LogStep(ctx, step, "error", "", err.Error(), ms)
+		maxRetries := step.RetryCount
+		if maxRetries < 1 { maxRetries = 1 }
+		var lastErr error
+		var resp string
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			start := time.Now()
+			resp, lastErr = execFn(ctx, step.DeviceID, step.Action, step.TargetValue)
+			ms := int(time.Since(start).Milliseconds())
+			if lastErr == nil {
+				e.LogStep(ctx, step, "success", resp, "", ms)
+				break
+			}
+			if attempt < maxRetries {
+				slog.Warn("step retry", "plan", e.PlanName, "dev", step.DeviceName, "attempt", attempt, "err", lastErr)
+			} else {
+				e.LogStep(ctx, step, "error", "", lastErr.Error(), ms)
+			}
+		}
+		if lastErr != nil {
 			return
 		}
-		e.LogStep(ctx, step, "success", resp, "", ms)
 		if step.WaitSeconds > 0 {
 			select {
 			case <-time.After(time.Duration(step.WaitSeconds) * time.Second):
 			case <-ctx.Done():
-				e.Status = "stopped"
+				setStopped()
 				return
 			}
 		}

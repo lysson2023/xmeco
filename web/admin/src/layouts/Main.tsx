@@ -1,7 +1,7 @@
 ﻿import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Menu, Button, Dropdown } from 'antd';
-import { DashboardOutlined, ProjectOutlined, HomeOutlined, ApiOutlined, SettingOutlined, CodeOutlined, AlertOutlined, PlayCircleOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, UserOutlined, TeamOutlined, SafetyCertificateOutlined, FileTextOutlined } from '@ant-design/icons';
+import { DashboardOutlined, ProjectOutlined, HomeOutlined, ApiOutlined, SettingOutlined, CodeOutlined, AlertOutlined, PlayCircleOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, UserOutlined, TeamOutlined, SafetyCertificateOutlined, FileTextOutlined, RobotOutlined } from '@ant-design/icons';
 const { Header, Sider, Content } = Layout;
 export default function MainLayout() {
   const [collapsed, setCollapsed] = useState(false); const navigate = useNavigate(); const location = useLocation();
@@ -19,6 +19,7 @@ export default function MainLayout() {
     { key: '/alarms', icon: <AlertOutlined />, label: '告警管理' },
     { key: '/startup-plans', icon: <PlayCircleOutlined />, label: '启停配置' },
     { type: 'divider' },
+    { key: '/multi-agent', icon: <RobotOutlined />, label: '多智能体' },
     { key: '/logs', icon: <FileTextOutlined />, label: '日志管理' },
   ];
   const logout = () => { localStorage.clear(); navigate('/login'); };

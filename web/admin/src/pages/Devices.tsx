@@ -1,6 +1,7 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, InputNumber } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../api/client';
 
 const DEVICE_TYPES = ['主机', '冷冻泵', '冷却泵', '冷却塔', '阀门', '二次泵', '电表', '温湿度传感器', '其它'];
@@ -17,10 +18,23 @@ export default function Devices() {
   const [selectedBuilding, setSelectedBuilding] = useState<number | null>(null);
   const [customType, setCustomType] = useState(false);
   const [form] = Form.useForm();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mounted = useRef(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     api.get('/projects').then(r => setProjects(r.data));
-    api.get('/buildings').then(r => setAllBuildings(r.data));
+    api.get('/buildings').then(r => {
+      setAllBuildings(r.data);
+      const bid = searchParams.get('building_id');
+      if (bid) {
+        const building = r.data.find((b: any) => Number(b.id) === Number(bid));
+        if (building) {
+          setSelectedProject(Number(building.project_id));
+          setSelectedBuilding(Number(bid));
+        }
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -38,12 +52,30 @@ export default function Devices() {
 
   useEffect(() => {
     if (selectedBuilding) {
+      setSearchParams({ building_id: String(selectedBuilding) });
+    } else if (mounted.current) {
+      setSearchParams({});
+    }
+    mounted.current = true;
+  }, [selectedBuilding]);
+
+  useEffect(() => {
+    if (selectedBuilding) {
       setLoading(true);
       api.get('/devices?building_id='+selectedBuilding).then(r => { setData(r.data); setLoading(false); });
     } else {
       setData([]);
     }
   }, [selectedBuilding]);
+
+  const getBuildingName = (buildingId: number) =>
+    allBuildings.find((b: any) => Number(b.id) === buildingId)?.name || '-';
+
+  const getProjectName = (buildingId: number) => {
+    const building = allBuildings.find((b: any) => Number(b.id) === buildingId);
+    if (!building) return '-';
+    return projects.find((p: any) => Number(p.id) === Number(building.project_id))?.name || '-';
+  };
 
   const save = async (v: any) => {
     const payload = { ...v, building_id: selectedBuilding };
@@ -62,15 +94,19 @@ export default function Devices() {
   const cols = [
     { title: 'ID', dataIndex: 'id', width: 45 },
     { title: '名称', dataIndex: 'name', width: 130 },
-    { title: '设备分类', dataIndex: 'device_type', width: 100 },
+    { title: '设备分类', dataIndex: 'device_type', width: 90 },
+    { title: '所属项目', dataIndex: 'building_id', width: 100, render: (v: number) => getProjectName(v) },
+    { title: '所属楼宇', dataIndex: 'building_id', width: 100, render: (v: number) => getBuildingName(v) },
     { title: '设备地址', dataIndex: 'node_address', width: 70, render: (v: number) => v || '-' },
     { title: '网关名称', dataIndex: 'gateway_type', width: 80, render: (v: string) => v || '-' },
     { title: '电台地址', dataIndex: 'device_no', width: 70, render: (v: number) => v || '-' },
     { title: '网关IMEI', dataIndex: 'gateway_imei', width: 140, ellipsis: true, render: (v: string) => v || '-' },
     { title: '状态', dataIndex: 'online_status', width: 60, render: (v: string) => v || '-' },
-    { title: '操作', width: 100, render: (_: any, r: any) => (
-      <Space>
+    { title: '操作', width: 180, render: (_: any, r: any) => (
+      <Space size="small">
         <a onClick={() => { setEditing(r); form.setFieldsValue(r); setCustomType(!DEVICE_TYPES.includes(r.device_type)); setModalOpen(true); }}>编辑</a>
+        <a onClick={() => navigate(`/properties?device_id=${r.id}`)}>属性</a>
+        <a onClick={() => navigate(`/logs?device_id=${r.id}`)}>日志</a>
         <Popconfirm title="确定删除?" onConfirm={() => del(r.id)}><a style={{ color: 'red' }}>删除</a></Popconfirm>
       </Space>
     )},
@@ -102,7 +138,7 @@ export default function Devices() {
         </div>
         {selectedBuilding && <div style={{ paddingBottom: 4, color: '#006875', fontWeight: 500 }}>共 {data.length} 台设备</div>}
       </div>
-      <Table rowKey="id" columns={cols} dataSource={data} loading={loading} scroll={{ x: 900 }}
+      <Table rowKey="id" columns={cols} dataSource={data} loading={loading} scroll={{ x: 1000 }}
         locale={{ emptyText: selectedBuilding ? '暂无设备' : '请先选择项目，再选择楼宇' }} />
       <Modal title={editing ? '编辑' : '新增'} open={modalOpen} onOk={form.submit} onCancel={() => { setModalOpen(false); setCustomType(false); }}>
         <Form form={form} layout="vertical" onFinish={save} initialValues={{ device_type: '主机' }}>

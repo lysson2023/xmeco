@@ -1,10 +1,21 @@
 ﻿<template><view class="mine">
-  <view class="head"><text class="username">Admin</text><text class="role">Super Admin</text></view>
+  <view class="head"><text class="username">{{userName}}</text><text class="role">{{roleName}}</text></view>
   <view class="menu">
-    <view class="item" @click="logout"><text>Logout</text></view>
+    <view class="item" @click="logout"><text>退出登录</text></view>
   </view>
 </view></template>
 <script setup lang="ts">
+import { ref, onMounted } from 'vue';
+import { api } from '../../api/client';
+const userName = ref(''), roleName = ref('');
+onMounted(async () => {
+  try {
+    const r = await api.get('/auth/me');
+    const d = r.data as any;
+    userName.value = d.username || '未登录';
+    roleName.value = d.role || '';
+  } catch {}
+});
 const logout = () => { uni.removeStorageSync('token'); uni.reLaunch({ url: '/pages/login/login' }) }
 </script>
 <style>

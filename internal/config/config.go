@@ -6,14 +6,14 @@ import (
 )
 
 type Config struct {
-	DBHost     string
-	DBPort     string
-	DBUser     string
-	DBPassword string
-	DBName     string
-	ServerPort string
-	JWTSecret  string
-	RedisAddr  string
+	DBHost       string
+	DBPort       string
+	DBUser       string
+	DBPassword   string
+	DBName       string
+	ServerPort   string
+	JWTSecret    string
+	WeatherAPIKey string
 }
 
 func Load() *Config {
@@ -21,11 +21,11 @@ func Load() *Config {
 		DBHost:     getEnv("XMECO_DB_HOST", "localhost"),
 		DBPort:     getEnv("XMECO_DB_PORT", "5432"),
 		DBUser:     getEnv("XMECO_DB_USER", "postgres"),
-		DBPassword: getEnv("XMECO_DB_PASSWORD", "xmeco123"), // TODO: 生产环境移除默认值
+		DBPassword: getEnv("XMECO_DB_PASSWORD", "xmeco123"),
 		DBName:     getEnv("XMECO_DB_NAME", "xmeco"),
 		ServerPort: getEnv("XMECO_SERVER_PORT", "9090"),
-		JWTSecret:  getEnv("XMECO_JWT_SECRET", "xmeco-dev-secret-change-in-production"),
-		RedisAddr:  getEnv("XMECO_REDIS_ADDR", "localhost:6379"),
+		JWTSecret:    getEnv("XMECO_JWT_SECRET", "xmeco-dev-secret-change-in-production"),
+		WeatherAPIKey: getEnv("XMECO_WEATHER_API_KEY", ""),
 	}
 }
 
