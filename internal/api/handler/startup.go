@@ -310,3 +310,160 @@ func (h *StartupHandler) StopExecution(w http.ResponseWriter, r *http.Request) {
 	}
 	ok(w, M{"status":"stopped"})
 }
+
+// ---- Scheduled Tasks ----
+
+type scheduledTaskRow struct {
+	ID           int     `json:"id"`
+	Name         string  `json:"name"`
+	BuildingID   int     `json:"building_id"`
+	DeviceID     int     `json:"device_id"`
+	DeviceName   string  `json:"device_name"`
+	ActionType   string  `json:"action_type"`
+	TargetValue  *string `json:"target_value"`
+	ScheduleType string  `json:"schedule_type"`
+	ScheduleTime string  `json:"schedule_time"`
+	DaysOfWeek   *string `json:"days_of_week"`
+	Enabled      bool    `json:"enabled"`
+	LastRunAt    *string `json:"last_run_at"`
+	LastResult   *string `json:"last_result"`
+	CreatedAt    string  `json:"created_at"`
+}
+
+func (h *StartupHandler) ListScheduledTasks(w http.ResponseWriter, r *http.Request) {
+	bid := queryInt(r, "building_id")
+	q := `SELECT st.id, st.name, st.building_id, st.device_id, COALESCE(d.name,''),
+		st.action_type, st.target_value, st.schedule_type,
+		st.schedule_time::text, st.days_of_week, st.enabled,
+		COALESCE(to_char(st.last_run_at,'YYYY-MM-DD HH24:MI:SS'),''),
+		COALESCE(st.last_result,''),
+		to_char(st.created_at,'YYYY-MM-DD HH24:MI:SS')
+	 FROM scheduled_task st JOIN device d ON d.id=st.device_id`
+	var args []any
+	if bid > 0 {
+		q += ` WHERE st.building_id=$1`
+		args = append(args, bid)
+	}
+	q += ` ORDER BY st.id`
+	rows, err := h.pool.Query(r.Context(), q, args...)
+	if err != nil { serverErr(w, err); return }
+	defer rows.Close()
+	var list []scheduledTaskRow
+	for rows.Next() {
+		var t scheduledTaskRow
+		if err := rows.Scan(&t.ID, &t.Name, &t.BuildingID, &t.DeviceID, &t.DeviceName,
+			&t.ActionType, &t.TargetValue, &t.ScheduleType,
+			&t.ScheduleTime, &t.DaysOfWeek, &t.Enabled,
+			&t.LastRunAt, &t.LastResult, &t.CreatedAt); err != nil {
+			slog.Warn("ListScheduledTasks scan failed", "err", err)
+			continue
+		}
+		if *t.LastRunAt == "" { t.LastRunAt = nil }
+		if *t.LastResult == "" { t.LastResult = nil }
+		list = append(list, t)
+	}
+	if list == nil { list = []scheduledTaskRow{} }
+	ok(w, list)
+}
+
+func (h *StartupHandler) CreateScheduledTask(w http.ResponseWriter, r *http.Request) {
+	var t scheduledTaskRow
+	if err := json.NewDecoder(r.Body).Decode(&t); err != nil { writeJSON(w, 400, M{"error":"格式错误"}); return }
+	if t.Name == "" || t.DeviceID == 0 || t.ScheduleTime == "" { writeJSON(w, 400, M{"error":"名称/设备/时间不能为空"}); return }
+	if t.ScheduleType == "" { t.ScheduleType = "once" }
+	err := h.pool.QueryRow(r.Context(),
+		`INSERT INTO scheduled_task (name,building_id,device_id,action_type,target_value,schedule_type,schedule_time,days_of_week,enabled)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7::time,$8,$9) RETURNING id`,
+		t.Name, t.BuildingID, t.DeviceID, t.ActionType, t.TargetValue, t.ScheduleType, t.ScheduleTime, t.DaysOfWeek, t.Enabled,
+	).Scan(&t.ID)
+	if err != nil { serverErr(w, err); return }
+	created(w, t)
+}
+
+func (h *StartupHandler) UpdateScheduledTask(w http.ResponseWriter, r *http.Request) {
+	var t scheduledTaskRow
+	if err := json.NewDecoder(r.Body).Decode(&t); err != nil { writeJSON(w, 400, M{"error":"格式错误"}); return }
+	_, err := h.pool.Exec(r.Context(),
+		`UPDATE scheduled_task SET name=$1,device_id=$2,action_type=$3,target_value=$4,schedule_type=$5,schedule_time=$6::time,days_of_week=$7,enabled=$8 WHERE id=$9`,
+		t.Name, t.DeviceID, t.ActionType, t.TargetValue, t.ScheduleType, t.ScheduleTime, t.DaysOfWeek, t.Enabled, pathID(r.URL.Path))
+	if err != nil { serverErr(w, err); return }
+	ok(w, M{"status":"updated"})
+}
+
+func (h *StartupHandler) DeleteScheduledTask(w http.ResponseWriter, r *http.Request) {
+	_, err := h.pool.Exec(r.Context(), `DELETE FROM scheduled_task WHERE id=$1`, pathID(r.URL.Path))
+	if err != nil { serverErr(w, err); return }
+	ok(w, M{"status":"deleted"})
+}
+
+// Helper: run due scheduled tasks (called by scheduler goroutine)
+func (h *StartupHandler) RunDueScheduledTasks(ctx context.Context) {
+	// NOTE: extract(dow) returns 0=Sun..6=Sat. days_of_week uses 1=Mon..7=Sun.
+	// Map Sunday (dow=0) to 7 for matching.
+	rows, err := h.pool.Query(ctx,
+		`SELECT st.id, st.device_id, st.action_type, st.target_value, COALESCE(d.name,'')
+		 FROM scheduled_task st JOIN device d ON d.id=st.device_id
+		 WHERE st.enabled=true
+		 AND st.schedule_time::time <= CURRENT_TIME::time
+		 AND (
+		   st.last_run_at IS NULL
+		   OR (st.last_run_at::date < CURRENT_DATE AND st.schedule_type != 'once')
+		 )
+		 AND (st.schedule_type='daily'
+		   OR (st.schedule_type='weekly' AND position(
+		     CASE extract(dow from CURRENT_DATE) WHEN 0 THEN '7' ELSE extract(dow from CURRENT_DATE)::text END
+		     in COALESCE(st.days_of_week,''))>0)
+		   OR st.schedule_type='once')
+		 ORDER BY st.id`)
+	if err != nil { return }
+	defer rows.Close()
+	for rows.Next() {
+		var id, devID int
+		var action, devName string
+		var targetVal *string
+		if err := rows.Scan(&id, &devID, &action, &targetVal, &devName); err != nil {
+			slog.Warn("RunDueScheduledTasks scan failed", "err", err)
+			continue
+		}
+		// Execute the action via gateway
+		if err := h.executeAction(ctx, devID, action, targetVal); err != nil {
+			if _, e := h.pool.Exec(ctx, `UPDATE scheduled_task SET last_result='failed', last_run_at=NOW() WHERE id=$1`, id); e != nil {
+				slog.Warn("scheduled task result update failed", "id", id, "err", e)
+			}
+			slog.Warn("scheduled task failed", "id", id, "err", err)
+		} else {
+			if _, e := h.pool.Exec(ctx, `UPDATE scheduled_task SET last_result='success', last_run_at=NOW() WHERE id=$1`, id); e != nil {
+				slog.Warn("scheduled task result update failed", "id", id, "err", e)
+			}
+			slog.Info("scheduled task completed", "id", id, "device", devID, "action", action)
+		}
+	}
+}
+
+func (h *StartupHandler) executeAction(ctx context.Context, devID int, action string, targetVal *string) error {
+	switch action {
+	case "startup":
+		_, err := h.pool.Exec(ctx,
+			`INSERT INTO control_record (project_name,building_name,device_name,prop_name,control_value,username,created_at)
+			 SELECT COALESCE(p.name,''), COALESCE(b.name,''), COALESCE(d.name,''), '开机', '1', '定时任务', NOW()
+			 FROM device d LEFT JOIN building b ON b.id=d.building_id LEFT JOIN project p ON p.id=b.project_id
+			 WHERE d.id=$1`, devID)
+		return err
+	case "shutdown":
+		_, err := h.pool.Exec(ctx,
+			`INSERT INTO control_record (project_name,building_name,device_name,prop_name,control_value,username,created_at)
+			 SELECT COALESCE(p.name,''), COALESCE(b.name,''), COALESCE(d.name,''), '关机', '0', '定时任务', NOW()
+			 FROM device d LEFT JOIN building b ON b.id=d.building_id LEFT JOIN project p ON p.id=b.project_id
+			 WHERE d.id=$1`, devID)
+		return err
+	default:
+		val := ""
+		if targetVal != nil { val = *targetVal }
+		_, err := h.pool.Exec(ctx,
+			`INSERT INTO control_record (project_name,building_name,device_name,prop_name,control_value,username,created_at)
+			 SELECT COALESCE(p.name,''), COALESCE(b.name,''), COALESCE(d.name,''), $3, $4, '定时任务', NOW()
+			 FROM device d LEFT JOIN building b ON b.id=d.building_id LEFT JOIN project p ON p.id=b.project_id
+			 WHERE d.id=$1`, devID, action, val)
+		return err
+	}
+}

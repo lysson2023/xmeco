@@ -93,6 +93,13 @@ func (r *AdminRepo) ResetPassword(ctx context.Context, id int, passwordHash stri
 	return err
 }
 
+// GetPasswordHash returns the bcrypt hash for a user.
+func (r *AdminRepo) GetPasswordHash(ctx context.Context, id int) (string, error) {
+	var h string
+	err := r.pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id=$1`, id).Scan(&h)
+	return h, err
+}
+
 func (r *AdminRepo) DeleteUser(ctx context.Context, id int) error {
 	_, err := r.pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, id)
 	return err

@@ -2,6 +2,7 @@
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"xmeco/internal/domain"
@@ -49,7 +50,8 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := h.repo.CreateUser(r.Context(), req, hash)
 	if err != nil {
-		writeJSON(w, http.StatusConflict, M{"error": "用户名已存在或创建失败: " + err.Error()})
+		slog.Warn("CreateUser failed", "username", req.Username, "err", err)
+		writeJSON(w, http.StatusConflict, M{"error": "用户名已存在或创建失败"})
 		return
 	}
 	created(w, user)
@@ -66,12 +68,13 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
 		return
 	}
-	id := pathLast(r.URL.Path)
+	id := pathID(r.URL.Path)
 	isActive := true
 	if body.IsActive != nil {
 		isActive = *body.IsActive
 	}
 	if err := h.repo.UpdateUser(r.Context(), id, body.RoleID, body.AgentID, isActive, body.Remark); err != nil {
+		slog.Warn("UpdateUser failed", "id", id, "err", err)
 		writeJSON(w, http.StatusInternalServerError, M{"error": "更新失败"})
 		return
 	}
@@ -80,13 +83,26 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 func (h *AdminHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Password string `json:"password"`
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Password == "" {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.NewPassword == "" {
 		writeJSON(w, http.StatusBadRequest, M{"error": "请输入新密码"})
 		return
 	}
-	hash, err := auth.HashPassword(body.Password)
+	// Verify old password
+	currentHash, err := h.repo.GetPasswordHash(r.Context(), pathID(r.URL.Path))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, M{"error": "用户不存在"})
+		return
+	}
+	if body.OldPassword != "" {
+		if err := auth.CheckPassword(currentHash, body.OldPassword); err != nil {
+			writeJSON(w, http.StatusForbidden, M{"error": "原密码错误"})
+			return
+		}
+	}
+	hash, err := auth.HashPassword(body.NewPassword)
 	if err != nil {
 		serverErr(w, err)
 		return

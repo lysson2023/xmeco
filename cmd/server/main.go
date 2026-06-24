@@ -146,6 +146,15 @@ func main() {
 		}
 	}()
 
+	// ---- scheduled task runner: check every minute ----
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			sh.RunDueScheduledTasks(context.Background())
+		}
+	}()
+
 	// ---- rate limiter: 10 login attempts per minute per IP ----
 	rateLimiter := middleware.NewRateLimiter(10, 1*time.Minute)
 
@@ -203,6 +212,11 @@ func main() {
 	protected.HandleFunc("POST /api/v1/startup-plans/{id}/execute", withPerm(authSvc, "schedule.create", sh.Execute))
 	protected.HandleFunc("GET /api/v1/startup-executions/{id}", withPerm(authSvc, "schedule.view", sh.GetExecution))
 	protected.HandleFunc("POST /api/v1/startup-executions/{id}/stop", withPerm(authSvc, "schedule.edit", sh.StopExecution))
+	// ---- 定时任务 ----
+	protected.HandleFunc("GET /api/v1/scheduled-tasks", withPerm(authSvc, "schedule.view", sh.ListScheduledTasks))
+	protected.HandleFunc("POST /api/v1/scheduled-tasks", withPerm(authSvc, "schedule.create", sh.CreateScheduledTask))
+	protected.HandleFunc("PUT /api/v1/scheduled-tasks/{id}", withPerm(authSvc, "schedule.edit", sh.UpdateScheduledTask))
+	protected.HandleFunc("DELETE /api/v1/scheduled-tasks/{id}", withPerm(authSvc, "schedule.delete", sh.DeleteScheduledTask))
 	protected.HandleFunc("GET /api/v1/telemetry/realtime", withPerm(authSvc, "monitor.realtime", th.Realtime))
 	protected.HandleFunc("GET /api/v1/telemetry/history", withPerm(authSvc, "monitor.graph", th.History))
 	protected.HandleFunc("GET /api/v1/telemetry/stats", withPerm(authSvc, "monitor.graph", th.Stats))

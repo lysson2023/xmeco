@@ -39,8 +39,21 @@ export default function Users() {
   };
 
   const saveEdit = async (v: any) => {
-    await api.put('/users/'+editing.id, { role_id: v.role_id, agent_id: v.agent_id, is_active: v.is_active, remark: v.remark });
-    message.success('已更新');
+    try {
+      await api.put('/users/'+editing.id, { role_id: v.role_id, agent_id: v.agent_id, is_active: v.is_active, remark: v.remark });
+      if (v.password) {
+        try {
+          await api.post('/users/'+editing.id+'/reset-password', { old_password: '', new_password: v.password });
+        } catch {
+          message.warning('用户信息已更新，但密码修改失败');
+          setEditOpen(false); setEditing(null); fetch();
+          return;
+        }
+      }
+      message.success('已更新');
+    } catch {
+      message.error('更新失败');
+    }
     setEditOpen(false); setEditing(null); fetch();
   };
 
@@ -50,7 +63,7 @@ export default function Users() {
     fetch();
   };
 
-  const resetPwd = async (v: { password: string }) => {
+  const resetPwd = async (v: { old_password: string; new_password: string }) => {
     await api.post('/users/'+pwdUserId+'/reset-password', v);
     message.success('密码已重置');
     setPwdOpen(false); pwdForm.resetFields();
@@ -61,6 +74,10 @@ export default function Users() {
   const cols = [
     { title: 'ID', dataIndex: 'id', width: 50 },
     { title: '用户名', dataIndex: 'username' },
+    { title: '密码', width: 80, render: (_: any, r: any) => (
+      <a onClick={() => { setPwdUserId(r.id); pwdForm.resetFields(); setPwdOpen(true); }}
+         style={{ color: '#006875', cursor: 'pointer' }}>••••••••</a>
+    )},
     { title: '角色', dataIndex: 'role_name' },
     { title: '代理商', dataIndex: 'agent_name', render: (v: string | null) => v || '-' },
     { title: '备注', dataIndex: 'remark', render: (v: string | null) => v || '-' },
@@ -94,7 +111,7 @@ export default function Users() {
       <Modal title="新增用户" open={modalOpen} onOk={form.submit} onCancel={() => setModalOpen(false)}>
         <Form form={form} layout="vertical" onFinish={save}>
           <Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="password" label="密码" rules={[{ required: true }]}><Input.Password /></Form.Item>
+          <Form.Item name="password" label="密码" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="role_id" label="角色" rules={[{ required: true }]}>
             <Select options={roles.map((r: any) => ({ value: r.id, label: r.name }))} />
           </Form.Item>
@@ -107,6 +124,7 @@ export default function Users() {
 
       <Modal title="编辑用户" open={editOpen} onOk={editForm.submit} onCancel={() => setEditOpen(false)}>
         <Form form={editForm} layout="vertical" onFinish={saveEdit}>
+          <Form.Item name="password" label="密码（留空则不修改）"><Input placeholder="留空则不修改密码" /></Form.Item>
           <Form.Item name="role_id" label="角色" rules={[{ required: true }]}>
             <Select options={roles.map((r: any) => ({ value: r.id, label: r.name }))} />
           </Form.Item>
@@ -118,9 +136,10 @@ export default function Users() {
         </Form>
       </Modal>
 
-      <Modal title="重置密码" open={pwdOpen} onOk={pwdForm.submit} onCancel={() => setPwdOpen(false)}>
+      <Modal title={`重置密码 — ${data.find(u => u.id === pwdUserId)?.username || ''}`} open={pwdOpen} onOk={pwdForm.submit} onCancel={() => setPwdOpen(false)}>
         <Form form={pwdForm} layout="vertical" onFinish={resetPwd}>
-          <Form.Item name="password" label="新密码" rules={[{ required: true }]}><Input.Password /></Form.Item>
+          <Form.Item name="old_password" label="原密码（管理员可留空）"><Input placeholder="管理员可不填原密码直接修改" /></Form.Item>
+          <Form.Item name="new_password" label="新密码" rules={[{ required: true, message: '请输入新密码' }]}><Input /></Form.Item>
         </Form>
       </Modal>
     </div>

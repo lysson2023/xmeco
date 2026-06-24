@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
-import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, Row, Col, InputNumber, Tag } from 'antd';
-import { PlusOutlined, DeleteOutlined, ArrowUpOutlined, ArrowDownOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, Row, Col, InputNumber, Tag, Tabs, Switch, TimePicker } from 'antd';
+import { PlusOutlined, DeleteOutlined, ArrowUpOutlined, ArrowDownOutlined, PlayCircleOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
+import dayjs, { Dayjs } from 'dayjs';
 
 export default function StartupPlans() {
   const [plans, setPlans] = useState<any[]>([]);
@@ -22,6 +23,16 @@ export default function StartupPlans() {
   const mounted = useRef(false);
   const restoring = useRef(false);
 
+  // ---- Scheduled Tasks ----
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [taskEditing, setTaskEditing] = useState<any>(null);
+  const [taskSelProject, setTaskSelProject] = useState<number|null>(null);
+  const [taskSelBuilding, setTaskSelBuilding] = useState<number|null>(null);
+  const [taskBuildings, setTaskBuildings] = useState<any[]>([]);
+  const [taskDevices, setTaskDevices] = useState<any[]>([]);
+  const [taskForm] = Form.useForm();
+
   useEffect(() => { api.get('/projects').then(r=>setProjects(r.data)); api.get('/buildings').then(r => {
     setAllBuildings(r.data);
     const bid = searchParams.get('building_id');
@@ -35,6 +46,7 @@ export default function StartupPlans() {
     }
   }); }, []);
 
+  // ---- Startup Plans cascade ----
   useEffect(() => {
     if(selProject){setBuildings(allBuildings.filter((b:any)=>Number(b.project_id)===Number(selProject))); if (!restoring.current) setSelBuilding(null);}
     else{setBuildings([]);setSelBuilding(null);setPlans([]);}
@@ -43,20 +55,29 @@ export default function StartupPlans() {
     if(selBuilding){setLoading(true);api.get('/startup-plans?building_id='+selBuilding).then(r=>{setPlans(r.data);setLoading(false); restoring.current = false;});api.get('/devices?building_id='+selBuilding).then(r=>setDevices(r.data));}
     else{setPlans([]);setDevices([]);}
   }, [selBuilding]);
-
   useEffect(() => {
     if (selBuilding) setSearchParams({ building_id: String(selBuilding) });
     else if (mounted.current) setSearchParams({});
     mounted.current = true;
   }, [selBuilding]);
 
+  // ---- Scheduled Tasks cascade ----
+  useEffect(() => {
+    if(taskSelProject){setTaskBuildings(allBuildings.filter((b:any)=>Number(b.project_id)===Number(taskSelProject))); setTaskSelBuilding(null);}
+    else{setTaskBuildings([]);setTaskSelBuilding(null);setTasks([]);}
+  }, [taskSelProject]);
+  useEffect(() => {
+    if(taskSelBuilding){api.get('/scheduled-tasks?building_id='+taskSelBuilding).then(r=>setTasks(r.data));api.get('/devices?building_id='+taskSelBuilding).then(r=>setTaskDevices(r.data));}
+    else{setTasks([]);setTaskDevices([]);}
+  }, [taskSelBuilding]);
+
+  // ---- Startup helpers ----
   const getBldName = (bid: number) => allBuildings.find((b:any)=>Number(b.id)===bid)?.name||'-';
   const getProjName = (bid: number) => {
     const bld = allBuildings.find((b:any)=>Number(b.id)===bid);
     if (!bld) return '-';
     return projects.find((p:any)=>Number(p.id)===Number(bld.project_id))?.name||'-';
   };
-
   const addStep = () => { setSteps([...steps, { device_id: devices[0]?.id||0, device_name: devices[0]?.name||'', wait_seconds: 20, retry_count: 1, sort_order: steps.length+1 }]); };
   const removeStep = (idx: number) => { setSteps(steps.filter((_,i)=>i!==idx).map((s,i)=>({...s,sort_order:i+1}))); };
   const moveStep = (idx: number, dir: number) => {
@@ -78,7 +99,30 @@ export default function StartupPlans() {
     if(selBuilding) api.get('/startup-plans?building_id='+selBuilding).then(r=>setPlans(r.data)); };
   const execute = async (id: number) => { await api.post('/startup-plans/'+id+'/execute'); message.success('已执行'); };
 
-  const cols = [
+  // ---- Scheduled Task helpers ----
+  const taskSave = async () => {
+    const v = taskForm.getFieldsValue();
+    if(!v.name||!taskSelBuilding||!v.device_id||!v.schedule_time){message.warning('请填写必填项');return;}
+    const timeStr = v.schedule_time.format('HH:mm:ss');
+    const payload: any = {
+      name: v.name, building_id: taskSelBuilding, device_id: v.device_id,
+      action_type: v.action_type||'startup', target_value: v.target_value||null,
+      schedule_type: v.schedule_type||'once', schedule_time: timeStr,
+      days_of_week: v.days_of_week||null, enabled: v.enabled!==false,
+    };
+    if(taskEditing){ await api.put('/scheduled-tasks/'+taskEditing.id, payload); message.success('已更新'); }
+    else { await api.post('/scheduled-tasks', payload); message.success('已创建'); }
+    setTaskModalOpen(false); setTaskEditing(null); taskForm.resetFields();
+    if(taskSelBuilding) api.get('/scheduled-tasks?building_id='+taskSelBuilding).then(r=>setTasks(r.data));
+  };
+  const taskDel = async (id: number) => { await api.delete('/scheduled-tasks/'+id); message.success('已删除');
+    if(taskSelBuilding) api.get('/scheduled-tasks?building_id='+taskSelBuilding).then(r=>setTasks(r.data)); };
+
+  const actionLabel = (a: string) => { const m: any = {startup:'开机',shutdown:'关机',set_value:'设值',mode_change:'切换模式'}; return m[a]||a; };
+  const actionColor = (a: string) => { const m: any = {startup:'green',shutdown:'red',set_value:'blue',mode_change:'orange'}; return m[a]||'default'; };
+  const scheduleLabel = (s: string) => { const m: any = {once:'单次',daily:'每天',weekly:'每周'}; return m[s]||s; };
+
+  const startupCols = [
     { title: 'ID', dataIndex: 'id', width: 40 },
     { title: '名称', dataIndex: 'name', width: 130 },
     { title: '所属项目', dataIndex: 'building_id', width: 100, render: (v:number) => getProjName(v) },
@@ -97,16 +141,45 @@ export default function StartupPlans() {
     </Space>)},
   ];
 
-  return (
+  const taskCols = [
+    { title: 'ID', dataIndex: 'id', width: 40 },
+    { title: '名称', dataIndex: 'name', width: 120 },
+    { title: '设备', dataIndex: 'device_name', width: 100 },
+    { title: '动作', dataIndex: 'action_type', width: 80, render: (v:string)=><Tag color={actionColor(v)}>{actionLabel(v)}</Tag> },
+    { title: '目标值', dataIndex: 'target_value', width: 80, render: (v:any)=>v||'-' },
+    { title: '周期', dataIndex: 'schedule_type', width: 70, render: (v:string)=>scheduleLabel(v) },
+    { title: '执行时间', dataIndex: 'schedule_time', width: 90 },
+    { title: '启用', dataIndex: 'enabled', width: 60, render: (v:boolean, r:any) =>
+      <Switch size="small" checked={v} onChange={async (c)=>{
+        await api.put('/scheduled-tasks/'+r.id, {...r, enabled: c, schedule_time: r.schedule_time});
+        setTasks(tasks.map(t=>t.id===r.id?{...t,enabled:c}:t));
+      }} />
+    },
+    { title: '上次结果', dataIndex: 'last_result', width: 80, render: (v:any)=>
+      v ? <Tag color={v==='success'?'green':'red'}>{v==='success'?'成功':'失败'}</Tag> : '-'
+    },
+    { title: '操作', width: 100, render: (_:any,r:any)=>(<Space size="small">
+      <a onClick={()=>{
+        setTaskEditing(r); taskForm.setFieldsValue({...r, schedule_time: r.schedule_time?dayjs(r.schedule_time,'HH:mm:ss'):null});
+        setTaskSelBuilding(r.building_id); setTaskModalOpen(true);
+      }}>编辑</a>
+      <Popconfirm title="确定?" onConfirm={()=>taskDel(r.id)}><a style={{color:'red'}}>删除</a></Popconfirm>
+    </Space>)},
+  ];
+
+  // ---- Tab: 一键启停 ----
+  const startupTab = (
     <div>
-      <div style={{display:'flex',justifyContent:'space-between',marginBottom:12}}><h2>一键启停</h2>
-        <Button type="primary" icon={<PlusOutlined/>} disabled={!selBuilding} onClick={()=>{setEditing(null);setSteps([]);setPlanType('startup');form.resetFields();setModalOpen(true);}}>新增</Button></div>
+      <div style={{display:'flex',justifyContent:'space-between',marginBottom:12}}>
+        <span></span>
+        <Button type="primary" icon={<PlusOutlined/>} disabled={!selBuilding} onClick={()=>{setEditing(null);setSteps([]);setPlanType('startup');form.resetFields();setModalOpen(true);}}>新增</Button>
+      </div>
       <div style={{display:'flex',gap:10,marginBottom:12,alignItems:'flex-end'}}>
         <div><div style={{marginBottom:2,color:'#666',fontSize:11}}>项目</div><Select style={{width:180}} placeholder="项目" allowClear value={selProject} onChange={v=>setSelProject(v?Number(v):null)} options={projects.map(p=>({value:p.id,label:p.name}))}/></div>
         <div><div style={{marginBottom:2,color:'#666',fontSize:11}}>楼宇</div><Select style={{width:180}} placeholder="楼宇" allowClear value={selBuilding} disabled={!selProject} onChange={v=>setSelBuilding(v?Number(v):null)} options={buildings.map(b=>({value:b.id,label:b.name}))}/></div>
         {selBuilding && <span style={{paddingBottom:2,color:'#006875',fontWeight:500}}>共{plans.length}个方案</span>}
       </div>
-      <Table rowKey="id" columns={cols} dataSource={plans} loading={loading} scroll={{x:950}} size="small"
+      <Table rowKey="id" columns={startupCols} dataSource={plans} loading={loading} scroll={{x:950}} size="small"
         locale={{emptyText:selBuilding?'暂无方案':'请先选择项目和楼宇'}}/>
       <Modal title={editing?'编辑':'新增'} width={700} open={modalOpen} onOk={save} onCancel={()=>{setModalOpen(false);setSteps([]);}}>
         <Form form={form} layout="vertical" initialValues={{plan_type:'startup'}}>
@@ -129,6 +202,83 @@ export default function StartupPlans() {
           </div>
         </Form>
       </Modal>
+    </div>
+  );
+
+  // ---- Tab: 定时任务 ----
+  const taskTab = (
+    <div>
+      <div style={{display:'flex',justifyContent:'space-between',marginBottom:12}}>
+        <span></span>
+        <Button type="primary" icon={<PlusOutlined/>} disabled={!taskSelBuilding}
+          onClick={()=>{setTaskEditing(null);taskForm.resetFields();setTaskModalOpen(true);}}>新增</Button>
+      </div>
+      <div style={{display:'flex',gap:10,marginBottom:12,alignItems:'flex-end'}}>
+        <div><div style={{marginBottom:2,color:'#666',fontSize:11}}>项目</div><Select style={{width:180}} placeholder="项目" allowClear value={taskSelProject} onChange={v=>setTaskSelProject(v?Number(v):null)} options={projects.map(p=>({value:p.id,label:p.name}))}/></div>
+        <div><div style={{marginBottom:2,color:'#666',fontSize:11}}>楼宇</div><Select style={{width:180}} placeholder="楼宇" allowClear value={taskSelBuilding} disabled={!taskSelProject} onChange={v=>setTaskSelBuilding(v?Number(v):null)} options={taskBuildings.map(b=>({value:b.id,label:b.name}))}/></div>
+        {taskSelBuilding && <span style={{paddingBottom:2,color:'#006875',fontWeight:500}}>共{tasks.length}个任务</span>}
+      </div>
+      <Table rowKey="id" columns={taskCols} dataSource={tasks} scroll={{x:900}} size="small"
+        locale={{emptyText:taskSelBuilding?'暂无任务':'请先选择项目和楼宇'}}/>
+      <Modal title={taskEditing?'编辑任务':'新增任务'} width={550} open={taskModalOpen} onOk={taskForm.submit} onCancel={()=>{setTaskModalOpen(false);setTaskEditing(null);}}>
+        <Form form={taskForm} layout="vertical" onFinish={taskSave} initialValues={{schedule_type:'daily',action_type:'startup',enabled:true}}>
+          <Form.Item name="name" label="任务名称" rules={[{required:true}]}><Input placeholder="例如：早8点开机"/></Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="device_id" label="选择设备" rules={[{required:true}]}>
+                <Select placeholder="选择设备" options={taskDevices.map((d:any)=>({value:d.id,label:d.name}))}/>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="action_type" label="动作类型" rules={[{required:true}]}>
+                <Select options={[
+                  {value:'startup',label:'开机'},{value:'shutdown',label:'关机'},
+                  {value:'set_value',label:'设定数值'},{value:'mode_change',label:'切换模式'},
+                ]}/>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="target_value" label="目标值（设定数值/切换模式时填写）">
+            <Input placeholder="例如：7°C 或 制冷模式"/>
+          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="schedule_type" label="执行周期">
+                <Select options={[
+                  {value:'once',label:'单次'},{value:'daily',label:'每天'},{value:'weekly',label:'每周'},
+                ]}/>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="schedule_time" label="执行时间" rules={[{required:true}]}>
+                <TimePicker format="HH:mm" style={{width:'100%'}}/>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="days_of_week" label="每周哪几天（1-7）" extra="逗号分隔，1=周一">
+                <Input placeholder="1,2,3,4,5"/>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="enabled" label="启用" valuePropName="checked">
+                <Switch/>
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
+      </Modal>
+    </div>
+  );
+
+  return (
+    <div>
+      <h2 style={{ marginBottom: 16 }}><ClockCircleOutlined style={{ marginRight: 8, color: '#006875' }} />启停配置</h2>
+      <Tabs defaultActiveKey="startup" size="large" items={[
+        { key: 'startup', label: <span><PlayCircleOutlined /> 一键启停</span>, children: startupTab },
+        { key: 'scheduled', label: <span><ClockCircleOutlined /> 定时任务</span>, children: taskTab },
+      ]} />
     </div>
   );
 }

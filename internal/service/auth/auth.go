@@ -125,3 +125,8 @@ func HashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	return string(bytes), err
 }
+
+// CheckPassword 验证密码与 bcrypt 哈希是否匹配
+func CheckPassword(hash, password string) error {
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+}
