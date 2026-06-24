@@ -78,8 +78,38 @@ func main() {
 	poller := telemetry.NewPoller(pool)
 	gwMgr := gateway.NewManager(poller.PollDevice, loadDevicesForGateway(pool), pool)
 	dh.SetGwMgr(gwMgr) // enable device control via gateway
+	if cfg.PollIntervalSec > 0 {
+		gwMgr.SetPollInterval(time.Duration(cfg.PollIntervalSec) * time.Second)
+		slog.Info("poll interval set", "seconds", cfg.PollIntervalSec)
+	}
 	gwMgr.StartCustomListener(ctxGW, ":8081")
 	gwMgr.StartDTUListener(ctxGW, ":502")
+
+	// ---- data retention cleanup: delete telemetry older than configured days ----
+	if cfg.RetentionDays > 0 {
+		go func() {
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				cutoff := time.Now().AddDate(0, 0, -cfg.RetentionDays)
+				// Batch delete in chunks to avoid long locks
+				for {
+					ct, err := pool.Exec(context.Background(),
+						`DELETE FROM device_telemetry WHERE ts < $1 AND ctid IN (SELECT ctid FROM device_telemetry WHERE ts < $1 LIMIT 10000)`,
+						cutoff)
+					if err != nil {
+						slog.Warn("data retention cleanup failed", "err", err)
+						break
+					}
+					if ct.RowsAffected() == 0 {
+						break
+					}
+					slog.Info("data retention: deleted rows", "count", ct.RowsAffected())
+				}
+			}
+		}()
+		slog.Info("data retention enabled", "days", cfg.RetentionDays)
+	}
 
 	// ---- offline detection: mark devices offline after 10 min, create alarm log ----
 	go func() {
@@ -88,7 +118,7 @@ func main() {
 		alarmEngine := alarm.New(pool)
 		for range ticker.C {
 			// Find devices that should be marked offline
-			rows, err := pool.Query(ctx,
+			rows, err := pool.Query(context.Background(),
 				`SELECT id, COALESCE(name,'') FROM device
 				 WHERE online_status='在线' AND last_online_at < NOW() - INTERVAL '10 minutes'`)
 			if err != nil {
@@ -102,13 +132,13 @@ func main() {
 					continue
 				}
 				// Create alarm log (deduplicated: only one un-acked offline alarm per device)
-				if err := alarmEngine.AlertOffline(ctx, id, name); err != nil {
+				if err := alarmEngine.AlertOffline(context.Background(), id, name); err != nil {
 					slog.Warn("offline alarm create failed", "dev", id, "err", err)
 				}
 			}
 			rows.Close()
 			// Update status
-			if _, err := pool.Exec(ctx,
+			if _, err := pool.Exec(context.Background(),
 				`UPDATE device SET online_status='离线'
 				 WHERE online_status='在线' AND last_online_at < NOW() - INTERVAL '10 minutes'`); err != nil {
 				slog.Warn("offline status update failed", "err", err)
@@ -214,6 +244,8 @@ func main() {
 	protected.HandleFunc("GET /api/v1/intelligence/strategies", withPerm(authSvc, "monitor.graph", ih.Strategies))
 	protected.HandleFunc("GET /api/v1/intelligence/price-config", withPerm(authSvc, "monitor.graph", ih.PriceConfig))
 	protected.HandleFunc("PUT /api/v1/intelligence/price-config", withPerm(authSvc, "monitor.graph", ih.SavePriceConfig))
+	protected.HandleFunc("GET /api/v1/intelligence/power-quality", withPerm(authSvc, "monitor.graph", ih.PowerQuality))
+	protected.HandleFunc("GET /api/v1/intelligence/meter-devices", withPerm(authSvc, "monitor.graph", ih.MeterDevices))
 
 	mux.Handle("/api/v1/", middleware.AuthMiddleware(authSvc)(protected))
 

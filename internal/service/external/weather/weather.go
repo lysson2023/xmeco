@@ -76,6 +76,10 @@ func (s *Service) getCached(ctx context.Context, locationID string) (*domain.Wea
 }
 
 func (s *Service) setCache(ctx context.Context, cityID int, cityName string, c *wttrCond, rawJSON string) {
+	if cityID <= 0 {
+		// No valid city ID; skip cache (will still return live data)
+		return
+	}
 	expiresAt := time.Now().Add(cacheDuration)
 	weatherText := ""
 	if len(c.WeatherDesc) > 0 {
@@ -85,7 +89,7 @@ func (s *Service) setCache(ctx context.Context, cityID int, cityName string, c *
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO weather_cache (city_id, location_id, city_name, temp, feels_like, icon, weather_text,
 		 wind_dir, wind_scale, humidity, precip, pressure, raw_json, fetched_at, expires_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW(),$13)`,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW(),$14)`,
 		cityID, locationID, cityName, c.TempC, c.FeelsLikeC, "", weatherText,
 		c.WindDir16, c.WindSpeedKm, c.Humidity, c.PrecipMM, c.Pressure, rawJSON, expiresAt)
 	if err != nil {
@@ -136,7 +140,13 @@ func (s *Service) GetNowByCityName(ctx context.Context, cityName string) (*domai
 	if cached, ok := s.getCached(ctx, cityName); ok {
 		return cached, nil
 	}
-	return s.getNowByName(ctx, 0, cityName)
+	// Resolve city ID from DB for the FK on weather_cache
+	var cityID int
+	if err := s.pool.QueryRow(ctx, `SELECT id FROM city WHERE name=$1`, cityName).Scan(&cityID); err != nil {
+		// City not in DB — use 0 (will fail FK on cache insert but weather data still returned)
+		cityID = 0
+	}
+	return s.getNowByName(ctx, cityID, cityName)
 }
 
 func (s *Service) getNowByName(ctx context.Context, cityID int, cityName string) (*domain.WeatherNow, error) {
