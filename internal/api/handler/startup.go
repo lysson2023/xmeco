@@ -17,11 +17,16 @@ import (
 type StartupHandler struct {
 	pool      *pgxpool.Pool
 	interlock *orchestrator.Interlock
+	dev       *DeviceHandler // enables real hardware dispatch for plan/scheduled control
 }
 
 func NewStartupHandler(pool *pgxpool.Pool) *StartupHandler {
 	return &StartupHandler{pool: pool, interlock: orchestrator.NewInterlock(pool)}
 }
+
+// SetDeviceHandler injects the device handler so that plan execution and scheduled
+// tasks dispatch real Modbus control commands to the gateway (not just audit records).
+func (h *StartupHandler) SetDeviceHandler(dh *DeviceHandler) { h.dev = dh }
 
 func (h *StartupHandler) ListPlans(w http.ResponseWriter, r *http.Request) {
 	buildingID := queryInt(r, "building_id")
@@ -86,7 +91,7 @@ func (h *StartupHandler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *StartupHandler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
-	id := pathLast(r.URL.Path)
+	id := pathID(r.URL.Path)
 	var body struct {
 		Name string `json:"name"`
 		PlanType string `json:"plan_type"`
@@ -129,7 +134,7 @@ func (h *StartupHandler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *StartupHandler) DeletePlan(w http.ResponseWriter, r *http.Request) {
-	id := pathLast(r.URL.Path)
+	id := pathID(r.URL.Path)
 	if _, err := h.pool.Exec(r.Context(), "DELETE FROM startup_step WHERE plan_id=$1", id); err != nil {
 		serverErr(w, err)
 		return
@@ -152,10 +157,13 @@ func (h *StartupHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	username := "admin"
-	if claims := middleware.GetClaims(r); claims != nil {
-		username = claims.Username
+	// Require authentication for plan execution.
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		writeJSON(w, http.StatusUnauthorized, M{"error": "未认证，无法执行启停操作"})
+		return
 	}
+	username := claims.Username
 
 	exec, err := orchestrator.StartExecution(r.Context(), h.pool, planID, plan.Name, username, len(steps))
 	if err != nil {
@@ -220,6 +228,9 @@ func (h *StartupHandler) execDeviceControl(ctx context.Context, devID int, actio
 	if err != nil {
 		return "", fmt.Errorf("写控制记录失败: %w", err)
 	}
+
+	// Dispatch to the physical device via the gateway (best-effort).
+	h.dispatchControl(ctx, devID, action)
 
 	if deviceStatus != "" {
 		if _, err := h.pool.Exec(ctx, `UPDATE device SET device_status=$1 WHERE id=$2`, deviceStatus, devID); err != nil {
@@ -358,8 +369,8 @@ func (h *StartupHandler) ListScheduledTasks(w http.ResponseWriter, r *http.Reque
 			slog.Warn("ListScheduledTasks scan failed", "err", err)
 			continue
 		}
-		if *t.LastRunAt == "" { t.LastRunAt = nil }
-		if *t.LastResult == "" { t.LastResult = nil }
+		if t.LastRunAt != nil && *t.LastRunAt == "" { t.LastRunAt = nil }
+		if t.LastResult != nil && *t.LastResult == "" { t.LastResult = nil }
 		list = append(list, t)
 	}
 	if list == nil { list = []scheduledTaskRow{} }
@@ -399,7 +410,8 @@ func (h *StartupHandler) DeleteScheduledTask(w http.ResponseWriter, r *http.Requ
 // Helper: run due scheduled tasks (called by scheduler goroutine)
 func (h *StartupHandler) RunDueScheduledTasks(ctx context.Context) {
 	// NOTE: extract(dow) returns 0=Sun..6=Sat. days_of_week uses 1=Mon..7=Sun.
-	// Map Sunday (dow=0) to 7 for matching.
+	// Map Sunday (dow=0) to 7 for matching. Use regexp_split_to_array to avoid
+	// substring false matches (e.g. "1" matching "10").
 	rows, err := h.pool.Query(ctx,
 		`SELECT st.id, st.device_id, st.action_type, st.target_value, COALESCE(d.name,'')
 		 FROM scheduled_task st JOIN device d ON d.id=st.device_id
@@ -410,10 +422,10 @@ func (h *StartupHandler) RunDueScheduledTasks(ctx context.Context) {
 		   OR (st.last_run_at::date < CURRENT_DATE AND st.schedule_type != 'once')
 		 )
 		 AND (st.schedule_type='daily'
-		   OR (st.schedule_type='weekly' AND position(
+		   OR (st.schedule_type='weekly' AND (
 		     CASE extract(dow from CURRENT_DATE) WHEN 0 THEN '7' ELSE extract(dow from CURRENT_DATE)::text END
-		     in COALESCE(st.days_of_week,''))>0)
-		   OR st.schedule_type='once')
+		   ) = ANY(regexp_split_to_array(COALESCE(st.days_of_week,''), '\s*,\s*')))
+		   OR (st.schedule_type='once' AND st.last_run_at IS NULL))
 		 ORDER BY st.id`)
 	if err != nil { return }
 	defer rows.Close()
@@ -448,6 +460,12 @@ func (h *StartupHandler) executeAction(ctx context.Context, devID int, action st
 			 SELECT COALESCE(p.name,''), COALESCE(b.name,''), COALESCE(d.name,''), '开机', '1', '定时任务', NOW()
 			 FROM device d LEFT JOIN building b ON b.id=d.building_id LEFT JOIN project p ON p.id=b.project_id
 			 WHERE d.id=$1`, devID)
+		if err == nil {
+			h.dispatchControl(ctx, devID, "startup")
+			if _, e := h.pool.Exec(ctx, `UPDATE device SET device_status='开机' WHERE id=$1`, devID); e != nil {
+				slog.Warn("scheduled task update status failed", "dev", devID, "err", e)
+			}
+		}
 		return err
 	case "shutdown":
 		_, err := h.pool.Exec(ctx,
@@ -455,15 +473,35 @@ func (h *StartupHandler) executeAction(ctx context.Context, devID int, action st
 			 SELECT COALESCE(p.name,''), COALESCE(b.name,''), COALESCE(d.name,''), '关机', '0', '定时任务', NOW()
 			 FROM device d LEFT JOIN building b ON b.id=d.building_id LEFT JOIN project p ON p.id=b.project_id
 			 WHERE d.id=$1`, devID)
+		if err == nil {
+			h.dispatchControl(ctx, devID, "shutdown")
+			if _, e := h.pool.Exec(ctx, `UPDATE device SET device_status='关机' WHERE id=$1`, devID); e != nil {
+				slog.Warn("scheduled task update status failed", "dev", devID, "err", e)
+			}
+		}
 		return err
 	default:
 		val := ""
 		if targetVal != nil { val = *targetVal }
 		_, err := h.pool.Exec(ctx,
 			`INSERT INTO control_record (project_name,building_name,device_name,prop_name,control_value,username,created_at)
-			 SELECT COALESCE(p.name,''), COALESCE(b.name,''), COALESCE(d.name,''), $3, $4, '定时任务', NOW()
+			 SELECT COALESCE(p.name,''), COALESCE(b.name,''), COALESCE(d.name,''), $2, $3, '定时任务', NOW()
 			 FROM device d LEFT JOIN building b ON b.id=d.building_id LEFT JOIN project p ON p.id=b.project_id
 			 WHERE d.id=$1`, devID, action, val)
+		if err == nil {
+			h.dispatchControl(ctx, devID, action)
+		}
 		return err
 	}
+}
+
+// dispatchControl forwards a control action to the physical device via the gateway.
+// Best-effort: if no device handler is wired up or the device is offline, it is a no-op
+// (the control_record written by the caller remains as the audit trail).
+func (h *StartupHandler) dispatchControl(ctx context.Context, devID int, action string) {
+	if h.dev == nil {
+		slog.Warn("startup/scheduled dispatch skipped: device handler not wired", "dev", devID, "action", action)
+		return
+	}
+	h.dev.dispatchHardware(ctx, devID, action)
 }

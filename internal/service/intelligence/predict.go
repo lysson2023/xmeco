@@ -31,8 +31,8 @@ func (s *Service) ForecastLoad(ctx context.Context, outdoorTemp float64) []LoadF
 		tempInfluence = 0.6
 	}
 
-	// Base cooling load estimate (from device ratings)
-	baseLoadKW := estimateSystemLoad()
+	// Base cooling load estimate — query DB for sum of chiller rated power
+	baseLoadKW := s.estimateSystemLoad(ctx)
 
 	for h := range 24 {
 		hour := (currentHour + h) % 24
@@ -57,9 +57,19 @@ func (s *Service) ForecastLoad(ctx context.Context, outdoorTemp float64) []LoadF
 	return result
 }
 
-// estimateSystemLoad returns the base cooling load estimate (kW).
-// TODO: replace with actual query summing rated power of chiller devices
-// from device_properties divided by ~3 for cooling load conversion.
-func estimateSystemLoad() float64 {
-	return 200.0
+// estimateSystemLoad queries the DB for the sum of rated power of all chiller
+// (主机) devices and converts to a realistic cooling-load baseline (~⅓ of rated).
+func (s *Service) estimateSystemLoad(ctx context.Context) float64 {
+	var totalKW float64
+	err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(COALESCE(dp.prop_value::numeric, 0)), 0)
+		 FROM device d
+		 JOIN device_properties dp ON dp.device_id = d.id
+		 WHERE d.device_type = '主机' AND dp.prop_name = '额定功率'`).
+		Scan(&totalKW)
+	if err != nil || totalKW <= 0 {
+		return 200.0 // sensible default when no chiller data
+	}
+	// Rated electrical power → cooling load conversion (~COP 3.0 equivalent)
+	return totalKW / 3.0
 }

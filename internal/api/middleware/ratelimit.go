@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -35,7 +37,7 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 // Responds with 429 Too Many Requests when the limit is exceeded.
 func (rl *RateLimiter) LimitLogin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ip := r.RemoteAddr
+		ip := clientIP(r)
 		rl.mu.Lock()
 		b, ok := rl.attempts[ip]
 		if !ok || time.Now().After(b.resetAt) {
@@ -51,6 +53,24 @@ func (rl *RateLimiter) LimitLogin(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// clientIP extracts the real client IP, preferring X-Forwarded-For / X-Real-IP
+// over RemoteAddr when behind a reverse proxy.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if ip := strings.TrimSpace(strings.Split(xff, ",")[0]); ip != "" {
+			return ip
+		}
+	}
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return strings.TrimSpace(xri)
+	}
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if ip != "" {
+		return ip
+	}
+	return r.RemoteAddr
 }
 
 func (rl *RateLimiter) cleanup(interval time.Duration) {

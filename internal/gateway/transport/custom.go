@@ -3,9 +3,18 @@
 import (
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
+)
+
+// Custom protocol frame constants
+const (
+	customFrameStart = 0x68 // Frame start marker
+	customFrameEnd   = 0x16 // Frame end marker
+	customCmdHi      = 0xE4 // Data command byte high
+	customCmdLo      = 0xA1 // Data command byte low
 )
 
 // CustomTransport handles the 0x68/0x16 proprietary gateway protocol
@@ -30,20 +39,26 @@ func NewCustomTransport(conn net.Conn, mac []byte) *CustomTransport {
 func (t *CustomTransport) Type() GatewayType { return TypeCustom }
 func (t *CustomTransport) GatewayID() string { return t.macStr }
 
-// IsConnected checks connection health without consuming data.
-// Uses a zero-length deadline probe: only treats immediate I/O errors as disconnected.
+// IsConnected checks connection health by performing a non-blocking read probe.
 func (t *CustomTransport) IsConnected() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.conn == nil || t.closed {
 		return false
 	}
-	// Set a past deadline to get immediate error if connection is broken.
-	// We do NOT read any bytes, so no data is consumed.
-	t.conn.SetReadDeadline(time.Now())
-	// Peek via SetReadDeadline only; actual read is avoided to prevent data loss.
-	// Reset deadline to zero (blocking) after probe.
-	t.conn.SetReadDeadline(time.Time{})
+	// Read 1 byte with 1ms deadline to detect broken pipe without consuming
+	// meaningful data (the byte is discarded).
+	t.conn.SetReadDeadline(time.Now().Add(1 * time.Millisecond))
+	buf := make([]byte, 1)
+	_, err := t.conn.Read(buf)
+	if err != nil {
+		// Timeout means connection is alive; any other error means dead.
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return true
+		}
+		slog.Warn("custom transport connection lost", "gw", t.macStr, "err", err)
+		return false
+	}
 	return true
 }
 
@@ -80,8 +95,8 @@ func (t *CustomTransport) wrap(data []byte) []byte {
 	frame := make([]byte, 14+n)
 	frame[0] = 0x68
 	copy(frame[1:7], t.mac)
-	frame[7] = 0xE4
-	frame[8] = 0xA1
+	frame[7] = customCmdHi
+	frame[8] = customCmdLo
 	frame[9] = byte(n >> 8)
 	frame[10] = byte(n)
 	copy(frame[11:11+n], data)
@@ -101,7 +116,7 @@ func (t *CustomTransport) unwrap(raw []byte) ([]byte, error) {
 	if raw[0] != 0x68 || raw[n-1] != 0x16 {
 		return nil, fmt.Errorf("invalid frame markers")
 	}
-	if raw[7] != 0xE4 || raw[8] != 0xA1 {
+	if raw[7] != customCmdHi || raw[8] != customCmdLo {
 		return nil, fmt.Errorf("invalid command code")
 	}
 	// Verify checksum

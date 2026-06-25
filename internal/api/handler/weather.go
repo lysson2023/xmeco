@@ -4,8 +4,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"xmeco/internal/domain"
 	"xmeco/internal/service/external/weather"
 )
@@ -14,8 +12,8 @@ type WeatherHandler struct {
 	svc *weather.Service
 }
 
-func NewWeatherHandler(pool *pgxpool.Pool) *WeatherHandler {
-	return &WeatherHandler{svc: weather.New(pool)}
+func NewWeatherHandler(svc *weather.Service) *WeatherHandler {
+	return &WeatherHandler{svc: svc}
 }
 
 // ListCities 获取城市列表（支持 ?q= 搜索）
@@ -44,7 +42,7 @@ func (h *WeatherHandler) ListProvinceCities(w http.ResponseWriter, r *http.Reque
 
 // GetCity 获取单个城市信息
 func (h *WeatherHandler) GetCity(w http.ResponseWriter, r *http.Request) {
-	id := pathLast(r.URL.Path)
+	id := pathID(r.URL.Path)
 	city, err := h.svc.GetCity(r.Context(), id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, M{"error": "城市不存在"})
@@ -66,6 +64,11 @@ func (h *WeatherHandler) Now(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cityID = id
+	}
+
+	if cityID == 0 && cityName == "" {
+		writeJSON(w, http.StatusBadRequest, M{"error": "city_id 和 city_name 不能同时为空"})
+		return
 	}
 
 	wd, err := h.svc.GetWeather(r.Context(), cityID, cityName)

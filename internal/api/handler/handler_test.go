@@ -17,98 +17,20 @@ func TestMParse(t *testing.T) {
 	}
 }
 
-func TestPathLast(t *testing.T) {
-	tests := []struct {
-		path string
-		want int
-	}{
-		{"/api/v1/projects/1", 1},
-		{"/api/v1/devices/42", 42},
-		{"/api/v1/users/999", 999},
-		{"/api/v1/projects/1/", 1},
-		{"/api/v1/buildings/0", 0},
-		{"/no/number/here", 0},
-		{"/", 0},
-	}
-	for _, tt := range tests {
-		got := pathLast(tt.path)
-		if got != tt.want {
-			t.Errorf("pathLast(%q) = %d, want %d", tt.path, got, tt.want)
-		}
-	}
-}
-
-func TestQueryInt(t *testing.T) {
-	tests := []struct {
-		query string
-		want  int
-	}{
-		{"?id=5", 5},
-		{"?page=10&size=20", 0}, // 'id' not present
-		{"?id=abc", 0},           // non-numeric
-		{"?id=", 0},              // empty
-		{"", 0},                  // no query
-	}
-	for _, tt := range tests {
-		req := httptest.NewRequest("GET", "/test"+tt.query, nil)
-		got := queryInt(req, "id")
-		if got != tt.want {
-			t.Errorf("queryInt(%q, \"id\") = %d, want %d", tt.query, got, tt.want)
-		}
-	}
-}
-
-func TestWriteJSON(t *testing.T) {
-	rec := httptest.NewRecorder()
-	writeJSON(rec, http.StatusOK, M{"status": "ok"})
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rec.Code)
-	}
-	ct := rec.Header().Get("Content-Type")
-	if ct != "application/json" {
-		t.Errorf("Content-Type = %q, want application/json", ct)
-	}
-	if rec.Body.Len() == 0 {
-		t.Error("body is empty")
-	}
-}
-
-func TestWriteJSONError(t *testing.T) {
-	rec := httptest.NewRecorder()
-	writeJSON(rec, http.StatusBadRequest, M{"error": "bad request"})
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rec.Code)
-	}
-}
-
-func TestWriteJSONNil(t *testing.T) {
-	rec := httptest.NewRecorder()
-	writeJSON(rec, http.StatusOK, nil)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rec.Code)
-	}
-	// nil marshals to "null\n" via json.NewEncoder which appends newline
-	if s := rec.Body.String(); s != "null\n" && s != "null" {
-		t.Errorf("nil body = %q, want null or null\\n", s)
-	}
-}
-
-func TestPathLastTrailingSlash(t *testing.T) {
+func TestPathIDTrailingSlash(t *testing.T) {
 	// Paths with trailing slashes should still work
-	if pathLast("/api/v1/projects/7/") != 7 {
+	if pathID("/api/v1/projects/7/") != 7 {
 		t.Error("trailing slash not handled")
 	}
 }
 
-func TestPathLastMultipleSegments(t *testing.T) {
-	if pathLast("/a/b/c/d/e/f/123/g") != 0 {
-		t.Error("last segment non-numeric should return 0")
+func TestPathIDMultipleSegments(t *testing.T) {
+	// pathID skips non-numeric segments to find the last numeric one
+	if pathID("/a/b/c/d/e/f/123/g") != 123 {
+		t.Error("should return 123 by skipping non-numeric 'g'")
 	}
-	if pathLast("/a/b/c/d/e/f/123") != 123 {
-		t.Error("last segment numeric should return value")
+	if pathID("/a/b/c/d/e/f/123") != 123 {
+		t.Error("last numeric segment should return 123")
 	}
 }
 

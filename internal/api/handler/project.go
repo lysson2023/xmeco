@@ -42,7 +42,7 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ProjectHandler) Get(w http.ResponseWriter, r *http.Request) {
-	p, err := h.repo.GetByID(r.Context(), pathLast(r.URL.Path))
+	p, err := h.repo.GetByID(r.Context(), pathID(r.URL.Path))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, M{"error": "项目不存在"})
 		return
@@ -56,7 +56,7 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
 		return
 	}
-	p.ID = pathLast(r.URL.Path)
+	p.ID = pathID(r.URL.Path)
 	if err := h.repo.Update(r.Context(), &p); err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "项目更新失败"})
 		return
@@ -65,9 +65,36 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.Delete(r.Context(), pathLast(r.URL.Path)); err != nil {
+	if err := h.repo.Delete(r.Context(), pathID(r.URL.Path)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "项目删除失败"})
 		return
 	}
 	writeJSON(w, http.StatusOK, M{"status": "deleted"})
+}
+
+// GetProjectUsers returns user IDs assigned to this project.
+func (h *ProjectHandler) GetProjectUsers(w http.ResponseWriter, r *http.Request) {
+	ids, err := h.repo.ListProjectUsers(r.Context(), pathID(r.URL.Path))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, M{"user_ids": ids})
+}
+
+// SetProjectUsers replaces user assignments for a project.
+func (h *ProjectHandler) SetProjectUsers(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		UserIDs []int `json:"user_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
+		return
+	}
+	if body.UserIDs == nil { body.UserIDs = []int{} }
+	if err := h.repo.SetProjectUsers(r.Context(), pathID(r.URL.Path), body.UserIDs); err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, M{"status": "updated"})
 }

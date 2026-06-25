@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -50,6 +51,7 @@ type wttrCond struct {
 	WindDir16   string     `json:"winddir16Point"`
 	WindSpeedKm string     `json:"windspeedKmph"`
 	PrecipMM    string     `json:"precipMM"`
+	WeatherCode string     `json:"weatherCode"`
 	WeatherDesc []wttrDesc `json:"weatherDesc"`
 }
 
@@ -72,6 +74,8 @@ func (s *Service) getCached(ctx context.Context, locationID string) (*domain.Wea
 		return nil, false
 	}
 	w.FetchedAt = fetchedAt.Format(time.RFC3339)
+	w.WeatherText = translateWeather(w.WeatherText, "")
+	w.WindDir = translateWindDir(w.WindDir)
 	return &w, true
 }
 
@@ -170,12 +174,14 @@ func (s *Service) getNowByName(ctx context.Context, cityID int, cityName string)
 			return nil, err
 		}
 		stale.FetchedAt = fetchedAt.Format(time.RFC3339)
+		stale.WeatherText = translateWeather(stale.WeatherText, "")
+		stale.WindDir = translateWindDir(stale.WindDir)
 		return &stale, nil
 	}
 
 	weatherText := ""
 	if len(cond.WeatherDesc) > 0 {
-		weatherText = cond.WeatherDesc[0].Value
+		weatherText = translateWeather(cond.WeatherDesc[0].Value, cond.WeatherCode)
 	}
 	s.setCache(ctx, cityID, cityName, cond, raw)
 
@@ -184,7 +190,7 @@ func (s *Service) getNowByName(ctx context.Context, cityID int, cityName string)
 		Temp:        cond.TempC,
 		FeelsLike:   cond.FeelsLikeC,
 		WeatherText: weatherText,
-		WindDir:     cond.WindDir16,
+		WindDir:     translateWindDir(cond.WindDir16),
 		WindScale:   cond.WindSpeedKm,
 		Humidity:    cond.Humidity,
 		Precip:      cond.PrecipMM,
@@ -295,4 +301,95 @@ func (s *Service) SearchCities(ctx context.Context, q string) ([]domain.City, er
 		cities = append(cities, c)
 	}
 	return cities, rows.Err()
+}
+
+var weatherCN = map[string]string{
+	// 晴/多云
+	"Sunny": "晴", "Clear": "晴",
+	"Partly cloudy": "多云", "Partly Cloudy": "多云",
+	"Cloudy": "阴", "Overcast": "阴",
+	// 雾/霾
+	"Mist": "雾", "Fog": "雾", "Freezing fog": "冻雾",
+	"Haze": "霾",
+	// 雨
+	"Light drizzle": "毛毛雨", "Patchy light drizzle": "局部毛毛雨",
+	"Light rain": "小雨", "Light Rain": "小雨",
+	"Patchy light rain": "局部小雨",
+	"Moderate rain": "中雨", "Moderate Rain": "中雨",
+	"Moderate rain at times": "间歇中雨",
+	"Heavy rain": "大雨", "Heavy Rain": "大雨",
+	"Heavy rain at times": "间歇大雨",
+	"Torrential rain shower": "暴雨",
+	"Patchy rain nearby": "局部阵雨", "Patchy rain possible": "可能有雨",
+	"Light rain shower": "小阵雨", "Light Rain Shower": "小阵雨",
+	"Moderate or heavy rain shower": "大阵雨",
+	// 雪
+	"Light snow": "小雪", "Patchy light snow": "局部小雪",
+	"Moderate snow": "中雪",
+	"Heavy snow": "大雪", "Patchy heavy snow": "局部大雪",
+	"Blizzard": "暴风雪", "Blowing snow": "吹雪",
+	"Light snow showers": "小阵雪", "Moderate or heavy snow showers": "大阵雪",
+	// 雨夹雪
+	"Light sleet": "小雨夹雪", "Moderate or heavy sleet": "雨夹雪",
+	"Patchy sleet nearby": "局部雨夹雪",
+	"Light sleet showers": "小阵雨夹雪",
+	// 冰雹
+	"Ice pellets": "冰粒", "Light showers of ice pellets": "小冰粒阵",
+	"Moderate or heavy showers of ice pellets": "大冰粒阵",
+	// 雷暴
+	"Thunderstorm": "雷暴", "Thundery outbreaks possible": "可能有雷暴",
+	"Patchy light rain with thunder": "局部雷阵雨",
+	"Moderate or heavy rain with thunder": "大雷雨",
+	// 风
+	"Windy": "大风",
+}
+
+// windDirCN maps 16-point compass directions to Chinese.
+var windDirCN = map[string]string{
+	"N": "北", "NNE": "北东北", "NE": "东北", "ENE": "东东北",
+	"E": "东", "ESE": "东东南", "SE": "东南", "SSE": "南东南",
+	"S": "南", "SSW": "南西南", "SW": "西南", "WSW": "西西南",
+	"W": "西", "WNW": "西西北", "NW": "西北", "NNW": "北西北",
+}
+
+func translateWindDir(dir string) string {
+	if cn, ok := windDirCN[dir]; ok {
+		return cn
+	}
+	return dir
+}
+
+// weatherCodeCN maps WorldWeatherOnline codes to Chinese.
+var weatherCodeCN = map[string]string{
+	"113": "晴", "116": "多云", "119": "阴", "122": "阴",
+	"143": "雾", "248": "雾", "260": "冻雾",
+	"176": "小雨", "263": "小雨", "266": "毛毛雨", "293": "毛毛雨", "296": "毛毛雨", "299": "中雨",
+	"302": "中雨", "305": "大雨", "308": "大雨", "311": "冻雨", "314": "冻雨",
+	"179": "阵雪", "227": "吹雪", "230": "暴风雪",
+	"182": "雨夹雪", "185": "冻雨", "281": "冻雨", "284": "冻雨",
+	"200": "雷暴", "386": "雷阵雨", "389": "大雷雨",
+	"317": "雨夹雪", "320": "雨夹雪", "323": "小雪", "326": "小雪", "329": "中雪",
+	"332": "中雪", "335": "大雪", "338": "大雪", "350": "冰粒", "353": "阵雨",
+	"356": "中雨", "359": "大雨", "362": "雨夹雪", "365": "雨夹雪",
+	"368": "小雪", "371": "大雪", "374": "冰粒", "377": "冰粒",
+	"392": "雷阵雪", "395": "大雷雪",
+}
+
+func translateWeather(text, code string) string {
+	s := strings.TrimSpace(text)
+	if cn, ok := weatherCN[s]; ok {
+		return cn
+	}
+	if cn, ok := weatherCodeCN[code]; ok {
+		return cn
+	}
+	if code != "" && len(code) >= 3 {
+		switch code[0] {
+		case '1': return "晴间多云"
+		case '2': return "局部雷暴"
+		case '3': return "阵雨"
+		case '4': return "雨夹雪"
+		}
+	}
+	return "多云"
 }

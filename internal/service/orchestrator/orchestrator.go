@@ -90,6 +90,16 @@ func (e *Execution) Finish(ctx context.Context) {
 	slog.Info("execution finished", "plan", e.PlanName, "status", e.Status)
 }
 
+// isStopped checks if the execution has been externally marked as stopped in the DB.
+func (e *Execution) isStopped(ctx context.Context) bool {
+	var status string
+	err := e.pool.QueryRow(ctx, `SELECT status FROM startup_execution WHERE id=$1`, e.ID).Scan(&status)
+	if err != nil {
+		return false
+	}
+	return status == "stopped"
+}
+
 func (e *Execution) Run(ctx context.Context, steps []Step, execFn func(ctx context.Context, devID int, action, target string) (string, error)) {
 	defer e.Finish(ctx)
 	setStopped := func() {
@@ -104,6 +114,13 @@ func (e *Execution) Run(ctx context.Context, steps []Step, execFn func(ctx conte
 			return
 		default:
 		}
+
+		// Check if execution was stopped via the API (StopExecution updates DB)
+		if e.isStopped(ctx) {
+			setStopped()
+			return
+		}
+
 		maxRetries := step.RetryCount
 		if maxRetries < 1 { maxRetries = 1 }
 		var lastErr error

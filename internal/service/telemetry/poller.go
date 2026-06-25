@@ -41,7 +41,8 @@ func NewPoller(pool *pgxpool.Pool) *Poller {
 func (p *Poller) PollDevice(ctx context.Context, gw *gateway.Gateway, dev gateway.DeviceRef) error {
 	registers, err := p.regRepo.ListByDeviceID(ctx, dev.DeviceID)
 	if err != nil { return fmt.Errorf("registers: %w", err) }
-	if len(registers) == 0 { return nil }
+	if len(registers) == 0 { slog.Debug("no registers for device", "dev", dev.DeviceID); return nil }
+	slog.Info("polling device", "dev", dev.DeviceID, "name", dev.DeviceName, "registers", len(registers))
 
 	props, err := p.propRepo.List(ctx, dev.DeviceID)
 	if err != nil { return fmt.Errorf("properties: %w", err) }
@@ -56,14 +57,19 @@ func (p *Poller) PollDevice(ctx context.Context, gw *gateway.Gateway, dev gatewa
 
 	for _, reg := range registers {
 		var raw []byte
-		mb := modbus.BuildReadCommand(dev.DeviceNo, codeFromStr(reg.ReadCode), uint16(reg.ReadAddr), uint16(reg.DataLength))
+		fc := modbus.CodeFromStr(reg.ReadCode)
+		// Write-only codes used as read_code → fall back to 03 (Read Holding Registers)
+		if fc == 0x05 || fc == 0x06 || fc == 0x0F || fc == 0x10 {
+			fc = 0x03
+		}
+		mb := modbus.BuildReadCommand(dev.DeviceNo, fc, uint16(reg.ReadAddr), uint16(reg.DataLength))
 		if tt.Type() == transport.TypeCustom {
 			lora := []byte{byte(dev.NodeAddr >> 8), byte(dev.NodeAddr)}
 			raw, err = tt.SendAndReceive(append(lora, mb...))
 		} else { raw, err = tt.SendAndReceive(mb) }
-		if err != nil { slog.Debug("poll", "dev", dev.DeviceID, "err", err); continue }
+		if err != nil { slog.Warn("poll modbus failed", "dev", dev.DeviceID, "addr", reg.ReadAddr, "err", err); continue }
 		data, ok := modbus.ParseResponse(raw)
-		if !ok { continue }
+		if !ok { slog.Warn("parse modbus response failed", "dev", dev.DeviceID, "addr", reg.ReadAddr, "raw_hex", fmt.Sprintf("%X", raw)); continue }
 		val := decodeVal(data, reg)
 
 		// Update device status from status_code mapping (e.g. "01=运行,02=停机")
@@ -89,15 +95,17 @@ func (p *Poller) PollDevice(ctx context.Context, gw *gateway.Gateway, dev gatewa
 				now, pt.DeviceID, pt.Metric, pt.Value, pt.Unit)
 		}
 		br := p.pool.SendBatch(ctx, batch)
-		defer br.Close()
 		for range points {
 			if _, err := br.Exec(); err != nil {
 				slog.Warn("telemetry batch insert failed", "dev", dev.DeviceID, "err", err)
 			}
 		}
+		if err := br.Close(); err != nil {
+			slog.Warn("telemetry batch close failed", "dev", dev.DeviceID, "err", err)
+		}
 
-		// Mark device online — any successful read confirms connectivity
-		if _, err := p.pool.Exec(ctx, `UPDATE device SET online_status='在线', last_online_at=NOW() WHERE id=$1`, dev.DeviceID); err != nil {
+		// Mark device online and record timestamp — any successful read confirms connectivity
+		if _, err := p.pool.Exec(ctx, `UPDATE device SET online_status='在线', last_online_at=NOW(), last_record_at=NOW() WHERE id=$1`, dev.DeviceID); err != nil {
 			slog.Warn("update online_status failed", "dev", dev.DeviceID, "err", err)
 		}
 
@@ -107,38 +115,6 @@ func (p *Poller) PollDevice(ctx context.Context, gw *gateway.Gateway, dev gatewa
 		}
 	}
 	return nil
-}
-
-// codeFromStr maps a Modbus function code hex string to byte.
-// Supported read codes: 01 (coils), 02 (discrete), 03 (holding, default), 04 (input).
-// Custom codes fall back to 03 (Read Holding Registers) to avoid write on read.
-func codeFromStr(s string) byte {
-	switch s {
-	case "01": return 0x01
-	case "02": return 0x02
-	case "04": return 0x04
-	case "03": return 0x03
-	default:
-		// attempt hex parse for custom codes like "0F", "17"
-		if v, err := hexToByte(s); err == nil {
-			return v
-		}
-		return 0x03 // safe default: Read Holding Registers
-	}
-}
-
-func hexToByte(s string) (byte, error) {
-	var b byte
-	for _, c := range s {
-		b <<= 4
-		switch {
-		case c >= '0' && c <= '9': b |= byte(c - '0')
-		case c >= 'a' && c <= 'f': b |= byte(c - 'a' + 10)
-		case c >= 'A' && c <= 'F': b |= byte(c - 'A' + 10)
-		default: return 0, fmt.Errorf("invalid hex char: %c", c)
-		}
-	}
-	return b, nil
 }
 
 func decodeVal(data []byte, reg domain.Register) float64 {
@@ -174,26 +150,30 @@ func decodeVal(data []byte, reg domain.Register) float64 {
 	return math.Round(val*1000) / 1000
 }
 
-// reorderForOrder reorders data bytes based on the configured byte/word order.
+// reorderForOrder returns a reordered copy of data based on the configured byte/word order.
+// The original slice is not modified.
 //
 // "高位在前" (default): Big Endian   — [0x12,0x34] → 0x1234  (keep as-is)
 // "低位在前": Little Endian           — [0x12,0x34] → [0x34,0x12] → 0x3412
 // "低字在前": Low word first (32bit) — [Hi,Hi,Lo,Lo] → [Lo,Lo,Hi,Hi]
 func reorderForOrder(data []byte, order string) []byte {
+	// Return a copy so we don't mutate the caller's buffer
+	out := make([]byte, len(data))
+	copy(out, data)
 	switch order {
 	case "低位在前":
 		// Reverse bytes within each 16-bit register
-		for i := 0; i+1 < len(data); i += 2 {
-			data[i], data[i+1] = data[i+1], data[i]
+		for i := 0; i+1 < len(out); i += 2 {
+			out[i], out[i+1] = out[i+1], out[i]
 		}
 	case "低字在前":
 		// Reverse 16-bit words (for 32-bit/4-byte values)
-		if len(data) >= 4 {
-			data[0], data[2] = data[2], data[0]
-			data[1], data[3] = data[3], data[1]
+		if len(out) >= 4 {
+			out[0], out[2] = out[2], out[0]
+			out[1], out[3] = out[3], out[1]
 		}
 	}
-	return data
+	return out
 }
 
 // applyMask applies a hex bitmask to the raw value.

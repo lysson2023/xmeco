@@ -90,17 +90,15 @@ func (h *AdminHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, M{"error": "请输入新密码"})
 		return
 	}
-	// Verify old password
+	// Verify old password (required for all reset operations).
 	currentHash, err := h.repo.GetPasswordHash(r.Context(), pathID(r.URL.Path))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, M{"error": "用户不存在"})
 		return
 	}
-	if body.OldPassword != "" {
-		if err := auth.CheckPassword(currentHash, body.OldPassword); err != nil {
-			writeJSON(w, http.StatusForbidden, M{"error": "原密码错误"})
-			return
-		}
+	if err := auth.CheckPassword(currentHash, body.OldPassword); err != nil {
+		writeJSON(w, http.StatusForbidden, M{"error": "原密码错误"})
+		return
 	}
 	hash, err := auth.HashPassword(body.NewPassword)
 	if err != nil {
@@ -115,7 +113,7 @@ func (h *AdminHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.DeleteUser(r.Context(), pathLast(r.URL.Path)); err != nil {
+	if err := h.repo.DeleteUser(r.Context(), pathID(r.URL.Path)); err != nil {
 		serverErr(w, err)
 		return
 	}
@@ -160,7 +158,7 @@ func (h *AdminHandler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, M{"error": "名称不能为空"})
 		return
 	}
-	if err := h.repo.UpdateAgent(r.Context(), pathLast(r.URL.Path), body.Name); err != nil {
+	if err := h.repo.UpdateAgent(r.Context(), pathID(r.URL.Path), body.Name); err != nil {
 		writeJSON(w, http.StatusNotFound, M{"error": "代理商不存在"})
 		return
 	}
@@ -168,7 +166,7 @@ func (h *AdminHandler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) DeleteAgent(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.DeleteAgent(r.Context(), pathLast(r.URL.Path)); err != nil {
+	if err := h.repo.DeleteAgent(r.Context(), pathID(r.URL.Path)); err != nil {
 		serverErr(w, err)
 		return
 	}
@@ -202,7 +200,8 @@ func (h *AdminHandler) ListPermissions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) GetRolePermissions(w http.ResponseWriter, r *http.Request) {
-	ids, err := h.repo.ListRolePermissions(r.Context(), pathLast(r.URL.Path))
+	roleID := pathID(r.URL.Path)
+	ids, err := h.repo.ListRolePermissions(r.Context(), roleID)
 	if err != nil {
 		serverErr(w, err)
 		return
@@ -210,7 +209,7 @@ func (h *AdminHandler) GetRolePermissions(w http.ResponseWriter, r *http.Request
 	if ids == nil {
 		ids = []int{}
 	}
-	ok(w, map[string]any{"role_id": pathLast(r.URL.Path), "perm_ids": ids})
+	ok(w, map[string]any{"role_id": roleID, "perm_ids": ids})
 }
 
 func (h *AdminHandler) SetRolePermissions(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +220,7 @@ func (h *AdminHandler) SetRolePermissions(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
 		return
 	}
-	if err := h.repo.SetRolePermissions(r.Context(), pathLast(r.URL.Path), body.PermIDs); err != nil {
+	if err := h.repo.SetRolePermissions(r.Context(), pathID(r.URL.Path), body.PermIDs); err != nil {
 		serverErr(w, err)
 		return
 	}

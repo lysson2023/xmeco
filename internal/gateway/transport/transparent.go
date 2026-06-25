@@ -2,6 +2,7 @@
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -29,15 +30,24 @@ func NewTransparentTransport(conn net.Conn, id string) *TransparentTransport {
 func (t *TransparentTransport) Type() GatewayType { return TypeTransparent }
 func (t *TransparentTransport) GatewayID() string { return t.id }
 
-// IsConnected checks connection health without consuming data.
+// IsConnected checks connection health by performing a non-blocking read probe.
 func (t *TransparentTransport) IsConnected() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.conn == nil || t.closed {
 		return false
 	}
-	t.conn.SetReadDeadline(time.Now())
-	t.conn.SetReadDeadline(time.Time{})
+	// Read 1 byte with 1ms deadline to detect broken pipe.
+	t.conn.SetReadDeadline(time.Now().Add(1 * time.Millisecond))
+	buf := make([]byte, 1)
+	_, err := t.conn.Read(buf)
+	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return true
+		}
+		slog.Warn("dtu transport connection lost", "gw", t.id, "err", err)
+		return false
+	}
 	return true
 }
 
@@ -47,16 +57,21 @@ func (t *TransparentTransport) SendAndReceive(data []byte) ([]byte, error) {
 	if t.closed || t.conn == nil {
 		return nil, fmt.Errorf("dtu: connection closed")
 	}
+
+	// Drain any stale bytes BEFORE sending (previous failed read leftovers).
+	// Limit to max 10 iterations to prevent infinite loops on noisy connections.
+	t.conn.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
+	junk := make([]byte, 1024)
+	for i := 0; i < 10; i++ {
+		_, err := t.conn.Read(junk)
+		if err != nil { break }
+	}
+
 	t.conn.SetWriteDeadline(time.Now().Add(t.timeout))
 	if _, err := t.conn.Write(data); err != nil {
 		t.closed = true
 		return nil, fmt.Errorf("dtu send: %w", err)
 	}
-
-	// Drain stale data
-	t.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-	junk := make([]byte, 1024)
-	t.conn.Read(junk)
 
 	// Read Modbus response: addr(1) + func(1) + ...
 	t.conn.SetReadDeadline(time.Now().Add(t.timeout))

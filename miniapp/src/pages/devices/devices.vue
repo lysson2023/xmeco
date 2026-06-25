@@ -5,8 +5,9 @@
     </picker>
     <text class="count" v-if="devices.length">{{devices.length}}台</text>
   </view>
-  <view class="item" v-for="d in devices" :key="d.id" @click="goDetail(d)">
-    <view class="info"><text class="name">{{d.name}}</text><text class="type">{{d.device_type}}</text></view>
+  <view class="item" v-for="d in devices" :key="d.id">
+    <view class="info" @click="goDetail(d)"><text class="name">{{d.name}}</text><text class="type">{{d.device_type}}</text></view>
+    <text class="history-link" @click="goHistory(d)">历史</text>
     <text class="status" :class="d.online_status==='在线'?'on':'off'">{{d.online_status||'离线'}}</text>
   </view>
 </view></template>
@@ -33,6 +34,7 @@ const onBldChange = (e: any) => {
   load();
 };
 const goDetail = (d: any) => uni.navigateTo({ url: '/pages/detail/detail?id='+d.id })
+const goHistory = (d: any) => uni.navigateTo({ url: '/pages/history/history?device_id='+d.id+'&device_name='+encodeURIComponent(d.name) })
 </script>
 <style>
 .list { padding: 20rpx; }

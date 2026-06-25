@@ -3,6 +3,7 @@
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -82,8 +83,10 @@ func (s *Service) Login(ctx context.Context, username, password string) (string,
 		return "", nil, err
 	}
 
-	// 更新最后登录时间
-	s.pool.Exec(ctx, `UPDATE users SET last_login_at = NOW() WHERE id = $1`, user.ID)
+	// 更新最后登录时间 (best-effort, log on failure)
+	if _, err := s.pool.Exec(ctx, `UPDATE users SET last_login_at = NOW() WHERE id = $1`, user.ID); err != nil {
+		slog.Warn("update last_login_at failed", "user", user.ID, "err", err)
+	}
 
 	// 生成 JWT
 	claims := Claims{

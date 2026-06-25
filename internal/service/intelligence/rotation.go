@@ -11,12 +11,14 @@ import (
 
 func (s *Service) rotationPlan(ctx context.Context) []RotationItem {
 	// Single query approach (avoids N+1): JOIN device with control_record on device_name.
+	// Run-hours are estimated from control_record count (1 record ≈ 1 hour runtime)
+	// because snapshot_after start/stop timestamps are not yet populated.
 	// NOTE: control_record has no device_id FK, so we match by device_name.
-	// If two devices share a name, their run hours will be merged — this is a known
+	// If two devices share a name, their counts will be merged — this is a known
 	// limitation until a device_id column is added to control_record.
 	rows, err := s.pool.Query(ctx,
 		`SELECT d.id, d.name, d.device_type,
-		 COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(c.snapshot_after->>'finished_at', NOW()::text))::timestamptz - c.created_at))/3600, 0) as run_hours
+		 COALESCE(COUNT(c.id), 0)::float8 as run_hours
 		 FROM device d
 		 LEFT JOIN control_record c ON c.device_name = d.name
 		 WHERE d.device_type IN ('主机','冷冻泵','冷却泵','冷却塔')

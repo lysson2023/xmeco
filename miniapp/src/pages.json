@@ -25,6 +25,12 @@
       }
     },
     {
+      "path": "pages/history/history",
+      "style": {
+        "navigationBarTitleText": "历史数据"
+      }
+    },
+    {
       "path": "pages/alarms/alarms",
       "style": {
         "navigationBarTitleText": "告警中心"

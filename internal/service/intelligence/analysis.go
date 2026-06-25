@@ -6,12 +6,21 @@ import (
 	"log/slog"
 	"math"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// dbPool abstracts the pgxpool methods used by intelligence services.
+// Both *pgxpool.Pool and pgxmock.PgxPoolIface satisfy this interface.
+type dbPool interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
 // Service bundles all intelligence analysis capabilities.
 type Service struct {
-	pool *pgxpool.Pool
+	pool dbPool
 }
 
 // New creates a new intelligence service.

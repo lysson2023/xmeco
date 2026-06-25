@@ -90,7 +90,7 @@ func (h *AlarmHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AlarmHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
-	id := pathLast(r.URL.Path)
+	id := pathID(r.URL.Path)
 	var rr alarmRuleReq
 	if err := json.NewDecoder(r.Body).Decode(&rr); err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
@@ -104,7 +104,7 @@ func (h *AlarmHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AlarmHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.pool.Exec(r.Context(), "DELETE FROM alarm_rule WHERE id=$1", pathLast(r.URL.Path)); err != nil {
+	if _, err := h.pool.Exec(r.Context(), "DELETE FROM alarm_rule WHERE id=$1", pathID(r.URL.Path)); err != nil {
 		serverErr(w, err)
 		return
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,26 +35,23 @@ func (e *Engine) Evaluate(ctx context.Context, deviceID int, deviceName, deviceT
 		}
 		if !triggered(cond, value, threshold, minVal, maxVal) { continue }
 
-		var recentID int
-		if err := e.pool.QueryRow(ctx,
-			`SELECT id FROM alarm_log WHERE device_id=$1 AND alarm_type=$2 AND ack_at IS NULL ORDER BY created_at DESC LIMIT 1`,
-			deviceID, metric).Scan(&recentID); err != nil {
-			recentID = 0
-		}
-		if recentID > 0 { continue }
-
 		msg := buildAlarmMsg(deviceName, metric, value, cond, threshold, minVal, maxVal)
 		thr := fmt.Sprintf("%.1f", threshold)
 		if cond == "range" {
 			thr = minVal + "~" + maxVal
 		}
-		if _, err := e.pool.Exec(ctx,
+		// Atomic dedup via partial unique index — eliminates TOCTOU race
+		// between SELECT and INSERT.
+		tag, err := e.pool.Exec(ctx,
 			`INSERT INTO alarm_log (device_id,device_name,alarm_type,level,message,value,threshold,created_at)
-			 VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
-			deviceID, deviceName, metric, level, msg, fmt.Sprintf("%.1f", value), thr, time.Now()); err != nil {
+			 VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+			 ON CONFLICT (device_id, alarm_type) WHERE ack_at IS NULL DO NOTHING`,
+			deviceID, deviceName, metric, level, msg, fmt.Sprintf("%.1f", value), thr, time.Now())
+		if err != nil {
 			slog.Error("alarm insert failed", "dev", deviceName, "err", err)
+		} else if tag.RowsAffected() > 0 {
+			slog.Warn("alarm", "dev", deviceName, "metric", metric, "level", level)
 		}
-		slog.Warn("alarm", "dev", deviceName, "metric", metric, "level", level)
 	}
 	return rows.Err()
 }
@@ -66,20 +64,31 @@ func triggered(cond string, val, threshold float64, minVal, maxVal string) bool 
 	case "le": return val <= threshold
 	case "eq": return val == threshold
 	case "range":
-		lo := parseFloat(minVal)
-		hi := parseFloat(maxVal)
-		return val < lo || val > hi
+		lo, loOK := parseFloatOK(minVal)
+		hi, hiOK := parseFloatOK(maxVal)
+		// If a non-empty bound failed to parse, skip the rule to avoid
+		// false positives (0 is a valid number, not a parse-failure sentinel).
+		if (minVal != "" && !loOK) || (maxVal != "" && !hiOK) {
+			return false
+		}
+		below := loOK && val < lo
+		above := hiOK && val > hi
+		return below || above
 	}
 	return false
 }
 
-func parseFloat(s string) float64 {
-	if s == "" { return 0 }
-	var f float64
-	if _, err := fmt.Sscanf(s, "%f", &f); err == nil {
-		return f
+// parseFloatOK parses s as a float64.
+// The second return value is false when s is empty or not a valid number.
+func parseFloatOK(s string) (float64, bool) {
+	if s == "" {
+		return 0, false
 	}
-	return 0
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, false
+	}
+	return f, true
 }
 
 func buildAlarmMsg(deviceName, metric string, value float64, cond string, threshold float64, minV, maxV string) string {
@@ -94,23 +103,23 @@ func buildAlarmMsg(deviceName, metric string, value float64, cond string, thresh
 }
 
 // AlertOffline creates an alarm log entry when a device goes offline.
-// Deduplicates: if an un-acked offline alarm already exists for this device, it is skipped.
+// Uses alarm_type='离线' (separate namespace from metric-based alarm_type
+// used by Evaluate). Deduplicates atomically via INSERT ... ON CONFLICT
+// DO NOTHING on the partial unique index (device_id, alarm_type)
+// WHERE ack_at IS NULL.
 func (e *Engine) AlertOffline(ctx context.Context, deviceID int, deviceName string) error {
-	var existing int
-	if err := e.pool.QueryRow(ctx,
-		`SELECT id FROM alarm_log WHERE device_id=$1 AND alarm_type='离线' AND ack_at IS NULL LIMIT 1`,
-		deviceID).Scan(&existing); err == nil && existing > 0 {
-		return nil // already alerted
-	}
 	msg := fmt.Sprintf("%s 设备离线，网络连接已断开超过 10 分钟", deviceName)
-	_, err := e.pool.Exec(ctx,
+	tag, err := e.pool.Exec(ctx,
 		`INSERT INTO alarm_log (device_id,device_name,alarm_type,level,message,value,threshold,created_at)
-		 VALUES($1,$2,'离线','warning',$3,'','',NOW())`,
+		 VALUES($1,$2,'离线','warning',$3,'','',NOW())
+		 ON CONFLICT (device_id, alarm_type) WHERE ack_at IS NULL DO NOTHING`,
 		deviceID, deviceName, msg)
 	if err != nil {
 		return err
 	}
-	slog.Warn("alarm: device offline", "dev", deviceName)
+	if tag.RowsAffected() > 0 {
+		slog.Warn("alarm: device offline", "dev", deviceName)
+	}
 	return nil
 }
 

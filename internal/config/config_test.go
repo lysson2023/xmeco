@@ -6,14 +6,17 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	// Clear any existing env vars for the test
 	for _, key := range []string{
 		"XMECO_DB_HOST", "XMECO_DB_PORT", "XMECO_DB_USER",
 		"XMECO_DB_PASSWORD", "XMECO_DB_NAME", "XMECO_SERVER_PORT",
-		"XMECO_JWT_SECRET", "XMECO_WEATHER_API_KEY",
+		"XMECO_JWT_SECRET",
+		"XMECO_RETENTION_DAYS", "XMECO_POLL_INTERVAL_SEC",
 	} {
 		os.Unsetenv(key)
 	}
+	// JWT secret is now mandatory — set a test value to avoid os.Exit(1).
+	os.Setenv("XMECO_JWT_SECRET", "test-secret")
+	defer os.Unsetenv("XMECO_JWT_SECRET")
 
 	cfg := Load()
 
@@ -32,8 +35,14 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ServerPort != "9090" {
 		t.Errorf("ServerPort = %q, want 9090", cfg.ServerPort)
 	}
-	if cfg.JWTSecret != "xmeco-dev-secret-change-in-production" {
-		t.Errorf("JWTSecret uses default")
+	if cfg.JWTSecret != "test-secret" {
+		t.Errorf("JWTSecret = %q, want test-secret", cfg.JWTSecret)
+	}
+	if cfg.RetentionDays != 730 {
+		t.Errorf("RetentionDays = %d, want 730", cfg.RetentionDays)
+	}
+	if cfg.PollIntervalSec != 3 {
+		t.Errorf("PollIntervalSec = %d, want 3", cfg.PollIntervalSec)
 	}
 }
 
@@ -42,9 +51,10 @@ func TestLoadCustom(t *testing.T) {
 	os.Setenv("XMECO_DB_PORT", "5433")
 	os.Setenv("XMECO_DB_NAME", "xmeco_test")
 	os.Setenv("XMECO_SERVER_PORT", "8080")
+	os.Setenv("XMECO_JWT_SECRET", "test-secret")
 	defer func() {
 		for _, key := range []string{
-			"XMECO_DB_HOST", "XMECO_DB_PORT", "XMECO_DB_NAME", "XMECO_SERVER_PORT",
+			"XMECO_DB_HOST", "XMECO_DB_PORT", "XMECO_DB_NAME", "XMECO_SERVER_PORT", "XMECO_JWT_SECRET",
 		} {
 			os.Unsetenv(key)
 		}
@@ -90,5 +100,40 @@ func TestGetEnv(t *testing.T) {
 	// Fallback
 	if v := getEnv("XMECO_NONEXISTENT", "default"); v != "default" {
 		t.Errorf("getEnv fallback = %q, want default", v)
+	}
+}
+
+func TestGetEnvInt(t *testing.T) {
+	os.Setenv("XMECO_TEST_INT", "90")
+	defer os.Unsetenv("XMECO_TEST_INT")
+
+	if v := getEnvInt("XMECO_TEST_INT", 365); v != 90 {
+		t.Errorf("getEnvInt set = %d, want 90", v)
+	}
+	if v := getEnvInt("XMECO_NONEXISTENT", 365); v != 365 {
+		t.Errorf("getEnvInt fallback = %d, want 365", v)
+	}
+}
+
+func TestGetEnvIntInvalid(t *testing.T) {
+	os.Setenv("XMECO_BAD_INT", "abc")
+	defer os.Unsetenv("XMECO_BAD_INT")
+
+	if v := getEnvInt("XMECO_BAD_INT", 365); v != 365 {
+		t.Errorf("getEnvInt invalid = %d, want fallback 365", v)
+	}
+}
+
+func TestGetEnvIntZeroRetention(t *testing.T) {
+	os.Setenv("XMECO_RETENTION_DAYS", "0")
+	os.Setenv("XMECO_JWT_SECRET", "test-secret")
+	defer func() {
+		os.Unsetenv("XMECO_RETENTION_DAYS")
+		os.Unsetenv("XMECO_JWT_SECRET")
+	}()
+
+	cfg := Load()
+	if cfg.RetentionDays != 0 {
+		t.Errorf("RetentionDays = %d, want 0 (disabled)", cfg.RetentionDays)
 	}
 }

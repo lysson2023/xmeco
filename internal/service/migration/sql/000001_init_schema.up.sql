@@ -25,6 +25,15 @@ CREATE TABLE IF NOT EXISTS startup_step_log (id SERIAL PRIMARY KEY, execution_id
 CREATE TABLE IF NOT EXISTS interlock_config (id SERIAL PRIMARY KEY, name VARCHAR(200), target_device_id INT NOT NULL REFERENCES device(id), target_action VARCHAR(50), check_device_id INT NOT NULL REFERENCES device(id), check_prop_name VARCHAR(100), check_expected_value VARCHAR(100), message VARCHAR(500));
 
 CREATE TABLE IF NOT EXISTS device_telemetry (ts TIMESTAMPTZ NOT NULL, device_id INT NOT NULL, metric TEXT NOT NULL, value DOUBLE PRECISION, unit TEXT);
-SELECT create_hypertable('device_telemetry', 'ts', if_not_exists => true);
+-- TimescaleDB hypertable: try if extension is available, otherwise use standard index.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname='timescaledb') THEN
+    PERFORM create_hypertable('device_telemetry', 'ts', if_not_exists => true);
+  ELSE
+    CREATE INDEX IF NOT EXISTS idx_device_telemetry_ts ON device_telemetry (ts DESC);
+    CREATE INDEX IF NOT EXISTS idx_device_telemetry_device_ts ON device_telemetry (device_id, ts DESC);
+  END IF;
+END $$;
 CREATE TABLE IF NOT EXISTS dashboard_config (key VARCHAR(50) PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS gateway_config (gateway_imei VARCHAR(64) PRIMARY KEY, gateway_type VARCHAR(20) NOT NULL DEFAULT 'custom', dtu_model VARCHAR(50), dtu_ip_expected VARCHAR(45), remark VARCHAR(500));

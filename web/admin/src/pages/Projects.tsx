@@ -14,22 +14,25 @@ export default function Projects() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
   const [agents, setAgents] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
   const [allBuildings, setAllBuildings] = useState<Building[]>([]);
   const [cascaderOptions, setCascaderOptions] = useState<any[]>([]);
   const [cityMap, setCityMap] = useState<Record<string, City>>({});
+  const [assignedUserIds, setAssignedUserIds] = useState<number[]>([]);
   const [form] = Form.useForm();
   const navigate = useNavigate();
 
   const fetch = async () => {
     setLoading(true);
     try {
-      const [p, a, b, provinces] = await Promise.all([
+      const [p, a, b, provinces, u] = await Promise.all([
         api.get('/projects'),
         api.get('/agents'),
         api.get('/buildings'),
         api.get('/weather/provinces'),
+        api.get('/users'),
       ]);
-      setData(p.data); setAgents(a.data); setAllBuildings(b.data);
+      setData(p.data); setAgents(a.data); setAllBuildings(b.data); setAllUsers(u.data || []);
 
       // 构建 Cascader 选项树: [省][市]
       const opts: any[] = [];
@@ -71,12 +74,10 @@ export default function Projects() {
 
   const save = async (values: any) => {
     try {
-      if (!values.city_id) {
-        values.city_id = null;
-        values.city_name = '';
-      }
+      if (!values.city_id) { values.city_id = null; values.city_name = ''; }
       if (editing) {
         await api.put('/projects/' + editing.id, values);
+        await api.put('/projects/' + editing.id + '/users', { user_ids: assignedUserIds });
         message.success('修改成功');
       } else {
         await api.post('/projects', values);
@@ -93,16 +94,18 @@ export default function Projects() {
     catch { message.error('删除失败'); }
   };
 
-  const openEdit = (r: Project) => {
+  const openEdit = async (r: Project) => {
     setEditing(r);
     form.setFieldsValue(r);
-    // 回填 Cascader 值: [省份, 城市id]
     if (r.city_id && r.city_name) {
       const city = cityMap[r.city_id];
-      if (city) {
-        form.setFieldValue('city_cascader', [city.province, r.city_id]);
-      }
+      if (city) form.setFieldValue('city_cascader', [city.province, r.city_id]);
     }
+    // Load assigned user IDs for this project
+    try {
+      const pu = await api.get('/projects/' + r.id + '/users');
+      setAssignedUserIds(pu.data.user_ids || []);
+    } catch { setAssignedUserIds([]); }
     setModalOpen(true);
   };
 
@@ -155,6 +158,13 @@ export default function Projects() {
           <Form.Item name="city_name" hidden><Input /></Form.Item>
           <Form.Item name="address" label="地址"><Input placeholder="选择城市后自动填充" /></Form.Item>
           <Form.Item name="admin_code" label="行政区划代码"><Input placeholder="选择城市后自动填充" /></Form.Item>
+          {editing && (
+            <Form.Item label="授权用户" extra="仅选中的用户可在大屏和小程序查看此项目">
+              <Select mode="multiple" placeholder="选择用户" value={assignedUserIds}
+                onChange={(v) => setAssignedUserIds(v)}
+                options={allUsers.map((u: any) => ({ value: u.id, label: u.username }))} />
+            </Form.Item>
+          )}
         </Form>
       </Modal>
     </div>

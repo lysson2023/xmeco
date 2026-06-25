@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react';
-import { Card, Checkbox, Button, message, Tag, Space } from 'antd';
+import { Card, Checkbox, Button, message, Space } from 'antd';
 import { SaveOutlined } from '@ant-design/icons';
 import api from '../api/client';
 
@@ -17,10 +17,8 @@ export default function Permissions() {
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [selectedRole, setSelectedRole] = useState<number | null>(null);
   const [checkedPerms, setCheckedPerms] = useState<number[]>([]);
-  const [loading, setLoading] = useState(false);
 
   const fetch = async () => {
-    setLoading(true);
     try {
       const [r, p] = await Promise.all([api.get('/roles'), api.get('/permissions')]);
       setRoles(r.data); setPermissions(p.data);
@@ -29,8 +27,6 @@ export default function Permissions() {
       }
     } catch {
       message.error('加载失败');
-    } finally {
-      setLoading(false);
     }
   };
   useEffect(() => { fetch(); }, []);
@@ -63,15 +59,6 @@ export default function Permissions() {
   const checkAll = (checked: boolean) => {
     setCheckedPerms(checked ? allPermIds : []);
   };
-
-  const rolePermCount: Record<number, number> = {};
-  // We compute on the fly based on checkedPerms
-  const roleColumns = [
-    { title: '角色名称', dataIndex: 'name' },
-    { title: '角色编码', dataIndex: 'code' },
-    { title: '级别', dataIndex: 'level' },
-    { title: '类型', dataIndex: 'is_system', render: (v: boolean) => v ? <Tag color="blue">系统</Tag> : <Tag>自定义</Tag> },
-  ];
 
   return (
     <div>

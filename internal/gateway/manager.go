@@ -17,6 +17,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Custom protocol constants
+const (
+	frameStart = 0x68 // Frame start marker
+	frameEnd   = 0x16 // Frame end marker
+	cmdRegHi   = 0xE5 // Registration command byte high (gateway handshake)
+	cmdRegLo   = 0xFF // Registration command byte low (gateway handshake)
+	cmdDataHi  = 0xE4 // Data command byte high (used by transport/custom.go)
+	cmdDataLo  = 0xA1 // Data command byte low (used by transport/custom.go)
+)
+
 type PollerFn func(ctx context.Context, gw *Gateway, dev DeviceRef) error
 
 // DeviceLoaderFn loads devices belonging to a gateway from the database.
@@ -45,11 +55,15 @@ type Manager struct {
 	poller         PollerFn
 	deviceLoader   DeviceLoaderFn
 	pool           *pgxpool.Pool
+	pollInterval   time.Duration
 }
 
 func NewManager(poller PollerFn, loader DeviceLoaderFn, pool *pgxpool.Pool) *Manager {
-	return &Manager{poller: poller, deviceLoader: loader, pool: pool, gateways: make(map[string]*Gateway)}
+	return &Manager{poller: poller, deviceLoader: loader, pool: pool, pollInterval: 3 * time.Second, gateways: make(map[string]*Gateway)}
 }
+
+// SetPollInterval sets the poll cycle duration (default 3s).
+func (m *Manager) SetPollInterval(d time.Duration) { m.pollInterval = d }
 
 func (m *Manager) StartCustomListener(ctx context.Context, addr string) error {
 	var err error
@@ -91,7 +105,7 @@ func (m *Manager) handleCustomConn(ctx context.Context, conn net.Conn) {
 	buf := make([]byte, 256)
 	n, err := conn.Read(buf)
 	if err != nil || n < 12 { slog.Warn("custom registration read failed", "remote", conn.RemoteAddr()); return }
-	if buf[0] != 0x68 || buf[n-1] != 0x16 || buf[7] != 0xE5 || buf[8] != 0xFF {
+	if buf[0] != frameStart || buf[n-1] != frameEnd || buf[7] != cmdRegHi || buf[8] != cmdRegLo {
 		slog.Warn("custom invalid registration", "remote", conn.RemoteAddr()); return
 	}
 	mac := make([]byte, 6)
@@ -192,23 +206,28 @@ func (m *Manager) handleDTUConn(ctx context.Context, conn net.Conn) {
 
 // markOnline updates online_status for all devices of a gateway to '在线'.
 func (m *Manager) markOnline(ctx context.Context, devs []DeviceRef) {
-	if m.pool == nil {
+	if m.pool == nil || len(devs) == 0 {
 		return
 	}
-	for _, d := range devs {
-		if _, err := m.pool.Exec(ctx, `UPDATE device SET online_status='在线', last_online_at=NOW() WHERE id=$1`, d.DeviceID); err != nil {
-			slog.Warn("mark online failed", "dev", d.DeviceID, "err", err)
-		}
+	ids := make([]int, len(devs))
+	for i, d := range devs {
+		ids[i] = d.DeviceID
+	}
+	if _, err := m.pool.Exec(ctx,
+		`UPDATE device SET online_status='在线', last_online_at=NOW() WHERE id = ANY($1)`,
+		ids); err != nil {
+		slog.Warn("mark online failed", "err", err)
 	}
 }
 
 func (m *Manager) pollLoop(ctx context.Context, gw *Gateway) {
-	ticker := time.NewTicker(3 * time.Second)
+	ticker := time.NewTicker(m.pollInterval)
 	defer ticker.Stop()
 	defer func() {
 		m.mu.Lock(); delete(m.gateways, gw.ID); m.mu.Unlock()
 		slog.Info("gateway disconnected", "id", gw.ID)
 	}()
+	sem := make(chan struct{}, 5)
 	for {
 		select {
 		case <-ctx.Done(): return
@@ -218,8 +237,15 @@ func (m *Manager) pollLoop(ctx context.Context, gw *Gateway) {
 			devs := gw.Devices
 			gw.mu.RUnlock()
 			for _, dev := range devs {
-				if err := m.poller(ctx, gw, dev); err != nil {
-					slog.Debug("poll error", "gw", gw.ID, "dev", dev.DeviceID, "err", err)
+				select {
+				case <-ctx.Done(): return
+				case sem <- struct{}{}:
+					go func(d DeviceRef) {
+						defer func() { <-sem }()
+						if err := m.poller(ctx, gw, d); err != nil {
+							slog.Debug("poll error", "gw", gw.ID, "dev", d.DeviceID, "err", err)
+						}
+					}(dev)
 				}
 			}
 		}
@@ -245,6 +271,9 @@ func (m *Manager) ListGateways() []string {
 // HandleListGateways is an HTTP handler that returns connected gateway IDs as JSON.
 func (m *Manager) HandleListGateways(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	b, _ := json.Marshal(m.ListGateways())
-	fmt.Fprintf(w, `{"gateways":%s}`, b)
+	ids := m.ListGateways()
+	if ids == nil {
+		ids = []string{}
+	}
+	json.NewEncoder(w).Encode(map[string]any{"gateways": ids})
 }

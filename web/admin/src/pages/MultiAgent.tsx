@@ -6,7 +6,7 @@ import {
   DashboardOutlined, DownloadOutlined, SearchOutlined,
 } from '@ant-design/icons';
 import api from '../api/client';
-import dayjs, { Dayjs } from 'dayjs';
+import type { Dayjs } from 'dayjs';
 
 const { RangePicker } = DatePicker;
 

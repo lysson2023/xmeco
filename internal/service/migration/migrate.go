@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"log/slog"
@@ -61,6 +62,8 @@ func Run(ctx context.Context, pool *pgxpool.Pool) error {
 		if err != nil {
 			return err
 		}
+		// Strip UTF-8 BOM if present (some editors add it silently)
+		sql = bytes.TrimPrefix(sql, []byte{0xEF, 0xBB, 0xBF})
 
 		tx, err := pool.Begin(ctx)
 		if err != nil {
@@ -123,9 +126,58 @@ func listMigrationFiles() ([]migrationFile, error) {
 // detectExistingVersion checks which key tables exist and returns the
 // highest migration version that corresponds to those tables.
 func detectExistingVersion(ctx context.Context, pool *pgxpool.Pool, files []migrationFile) int {
-	// Check for city table (from migration 005)
+	// Check for electricity_price table (migration 011)
 	var exists bool
 	err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name='electricity_price')`).Scan(&exists)
+	if err == nil && exists {
+		markApplied(ctx, pool, files, 11)
+		return 11
+	}
+
+	// Check for alarm dedup index (migration 010)
+	err = pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT FROM pg_indexes WHERE indexname='idx_alarm_log_dedup')`).Scan(&exists)
+	if err == nil && exists {
+		markApplied(ctx, pool, files, 10)
+		return 10
+	}
+
+	// Check for project_user table (migration 009)
+	err = pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name='project_user')`).Scan(&exists)
+	if err == nil && exists {
+		markApplied(ctx, pool, files, 9)
+		return 9
+	}
+
+	// Check for scheduled_task table (migration 008)
+	err = pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name='scheduled_task')`).Scan(&exists)
+	if err == nil && exists {
+		markApplied(ctx, pool, files, 8)
+		return 8
+	}
+
+	// Check for last_online_at column on device (migration 007)
+	err = pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_name='device' AND column_name='last_online_at')`).Scan(&exists)
+	if err == nil && exists {
+		markApplied(ctx, pool, files, 7)
+		return 7
+	}
+
+	// Check for gateway_imei column type VARCHAR(64) on gateway_config (migration 006)
+	var colType string
+	err = pool.QueryRow(ctx,
+		`SELECT data_type FROM information_schema.columns WHERE table_name='gateway_config' AND column_name='gateway_imei'`).Scan(&colType)
+	if err == nil && strings.Contains(strings.ToLower(colType), "varying") {
+		markApplied(ctx, pool, files, 6)
+		return 6
+	}
+
+	// Check for city table (from migration 005)
+	err = pool.QueryRow(ctx,
 		`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name='city')`).Scan(&exists)
 	if err == nil && exists {
 		markApplied(ctx, pool, files, 5)

@@ -3,7 +3,7 @@ import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, 
 import { PlusOutlined, DeleteOutlined, ArrowUpOutlined, ArrowDownOutlined, PlayCircleOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
-import dayjs, { Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
 
 export default function StartupPlans() {
   const [plans, setPlans] = useState<any[]>([]);
@@ -81,14 +81,14 @@ export default function StartupPlans() {
   const addStep = () => { setSteps([...steps, { device_id: devices[0]?.id||0, device_name: devices[0]?.name||'', wait_seconds: 20, retry_count: 1, sort_order: steps.length+1 }]); };
   const removeStep = (idx: number) => { setSteps(steps.filter((_,i)=>i!==idx).map((s,i)=>({...s,sort_order:i+1}))); };
   const moveStep = (idx: number, dir: number) => {
-    var ns = [...steps]; var ti = idx+dir; if(ti<0||ti>=ns.length) return;
+    let ns = [...steps]; const ti = idx+dir; if(ti<0||ti>=ns.length) return;
     [ns[idx],ns[ti]] = [ns[ti],ns[idx]]; ns = ns.map((s,i)=>({...s,sort_order:i+1})); setSteps(ns);
   };
 
   const save = async () => {
-    var v = form.getFieldsValue();
+    const v = form.getFieldsValue();
     if(!v.name||!selBuilding||steps.length===0){message.warning('请填写名称并添加至少一个步骤');return;}
-    var p: any = { name: v.name, building_id: selBuilding, plan_type: planType,
+    const p: any = { name: v.name, building_id: selBuilding, plan_type: planType,
       steps: steps.map((s,i)=>({device_id:s.device_id,sort_order:i+1,wait_seconds:s.wait_seconds,retry_count:s.retry_count||1,action:planType})) };
     if(editing){ await api.put('/startup-plans/'+editing.id, p); message.success('更新成功'); }
     else { await api.post('/startup-plans', p); message.success('创建成功'); }
@@ -130,12 +130,12 @@ export default function StartupPlans() {
     { title: '类型', dataIndex: 'plan_type', width: 70, render: (v:string)=><Tag color={v==='startup'?'green':'red'}>{v==='startup'?'启动':'停止'}</Tag> },
     { title: '步骤', dataIndex: 'steps', width: 300, render: (v:any)=>{
       if(!v||!Array.isArray(v)) return '-';
-      try{var s=typeof v==='string'?JSON.parse(v):v; return s.map((x:any,i:number)=><span key={i}>{x.device_name||x.device_id}{i<s.length-1?' → ':''}</span>)}
+      try{const s=typeof v==='string'?JSON.parse(v):v; return s.map((x:any,i:number)=><span key={i}>{x.device_name||x.device_id}{i<s.length-1?' → ':''}</span>)}
       catch(e){return '-'}
     }},
     { title: '操作', width: 150, render: (_:any,r:any)=>(<Space size="small">
       <a onClick={()=>{setEditing(r);form.setFieldsValue(r);setPlanType(r.plan_type||'startup');
-        var s=typeof r.steps==='string'?JSON.parse(r.steps||'[]'):(r.steps||[]);setSteps(s.map((x:any,i:number)=>({device_id:x.device_id,device_name:x.device_name,wait_seconds:x.wait_seconds||20,retry_count:x.retry_count||1,sort_order:i+1})));setModalOpen(true);}}>编辑</a>
+        const s=typeof r.steps==='string'?JSON.parse(r.steps||'[]'):(r.steps||[]);setSteps(s.map((x:any,i:number)=>({device_id:x.device_id,device_name:x.device_name,wait_seconds:x.wait_seconds||20,retry_count:x.retry_count||1,sort_order:i+1})));setModalOpen(true);}}>编辑</a>
       <a onClick={()=>execute(r.id)}><PlayCircleOutlined/>执行</a>
       <Popconfirm title="确定?" onConfirm={()=>del(r.id)}><a style={{color:'red'}}>删除</a></Popconfirm>
     </Space>)},
@@ -195,8 +195,8 @@ export default function StartupPlans() {
             {steps.length===0 && <div style={{color:'#999',textAlign:'center',padding:20}}>暂无步骤，点击"添加步骤"</div>}
             {steps.map((s,idx)=>(<Row key={idx} gutter={8} style={{marginBottom:8,alignItems:'center',background:'#fafafa',padding:'6px 8px',borderRadius:6}}>
               <Col flex="30px"><span style={{color:'#006875',fontWeight:600}}>{idx+1}</span></Col>
-              <Col flex="auto"><Select style={{width:'100%'}} value={s.device_id} onChange={v=>{var ns=[...steps];ns[idx].device_id=v;ns[idx].device_name=devices.find(d=>d.id===v)?.name||'';setSteps(ns);}} options={devices.map(d=>({value:d.id,label:d.name}))}/></Col>
-              <Col flex="90px"><InputNumber style={{width:'100%'}} addonAfter="秒" min={1} max={300} value={s.wait_seconds} onChange={v=>{var ns=[...steps];ns[idx].wait_seconds=v||20;setSteps(ns);}}/></Col>
+              <Col flex="auto"><Select style={{width:'100%'}} value={s.device_id} onChange={v=>{const ns=[...steps];ns[idx].device_id=v;ns[idx].device_name=devices.find(d=>d.id===v)?.name||'';setSteps(ns);}} options={devices.map(d=>({value:d.id,label:d.name}))}/></Col>
+              <Col flex="90px"><InputNumber style={{width:'100%'}} addonAfter="秒" min={1} max={300} value={s.wait_seconds} onChange={v=>{const ns=[...steps];ns[idx].wait_seconds=v||20;setSteps(ns);}}/></Col>
               <Col flex="60px"><Space size={0}><Button size="small" type="text" icon={<ArrowUpOutlined/>} disabled={idx===0} onClick={()=>moveStep(idx,-1)}/><Button size="small" type="text" icon={<ArrowDownOutlined/>} disabled={idx===steps.length-1} onClick={()=>moveStep(idx,1)}/><Button size="small" type="text" danger icon={<DeleteOutlined/>} onClick={()=>removeStep(idx)}/></Space></Col>
             </Row>))}
           </div>

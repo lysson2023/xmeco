@@ -30,12 +30,19 @@ func (h *LogHandler) Telemetry(w http.ResponseWriter, r *http.Request) {
 	}
 	export := r.URL.Query().Get("export") == "csv"
 
+	// Whitelist the interval parameter to prevent unexpected SQL function injection.
+	validIntervals := map[string]bool{"minute": true, "hour": true, "day": true, "week": true, "month": true, "year": true, "raw": true}
+	if interval != "" && !validIntervals[interval] {
+		writeJSON(w, http.StatusBadRequest, M{"error": "无效的时间间隔，可选值：minute/hour/day/week/month/year/raw"})
+		return
+	}
+
 	query := ""
 	args := []any{}
 	argIdx := 1
 
 	if interval != "" && interval != "raw" {
-		trunc := map[string]string{"hour": "hour", "day": "day", "month": "month", "year": "year"}[interval]
+		trunc := map[string]string{"minute": "minute", "hour": "hour", "day": "day", "week": "week", "month": "month", "year": "year"}[interval]
 		if trunc == "" {
 			trunc = "day"
 		}

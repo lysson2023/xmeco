@@ -25,12 +25,13 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { api } from '../../api/client';
-const username = ref('admin'), password = ref('admin123'), loading = ref(false);
+const username = ref(''), password = ref(''), loading = ref(false);
 const doLogin = async () => {
+  if (!username.value || !password.value) { uni.showToast({ title: '请输入用户名和密码', icon: 'none' }); return; }
   loading.value = true;
   try {
     const d = await api.login(username.value, password.value) as any;
-    uni.setStorageSync('token', d.token); uni.setStorageSync('user', JSON.stringify(d.user));
+    uni.setStorageSync('user', JSON.stringify(d.user));
     uni.switchTab({ url: '/pages/index/index' });
   } catch(e) { uni.showToast({ title: 'Login failed', icon: 'none' }); }
   finally { loading.value = false; }

@@ -1,6 +1,7 @@
-﻿package handler
+package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -21,11 +22,6 @@ type M map[string]any
 func queryInt(r *http.Request, key string) int {
 	v, _ := strconv.Atoi(r.URL.Query().Get(key))
 	return v
-}
-func pathLast(path string) int {
-	parts := strings.Split(strings.TrimRight(path, "/"), "/")
-	id, _ := strconv.Atoi(parts[len(parts)-1])
-	return id
 }
 
 // pathID returns the last numeric segment (skips suffixes like control, execute, ack).
@@ -59,7 +55,7 @@ func (h *BuildingHandler) List(w http.ResponseWriter, r *http.Request) {
 	ok(w, list)
 }
 func (h *BuildingHandler) Get(w http.ResponseWriter, r *http.Request) {
-	b, err := h.repo.GetByID(r.Context(), pathLast(r.URL.Path))
+	b, err := h.repo.GetByID(r.Context(), pathID(r.URL.Path))
 	if err != nil { notFound(w, "楼宇不存在"); return }
 	ok(w, b)
 }
@@ -72,12 +68,12 @@ func (h *BuildingHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *BuildingHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var b domain.Building
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
-	b.ID = pathLast(r.URL.Path)
+	b.ID = pathID(r.URL.Path)
 	if err := h.repo.Update(r.Context(), &b); err != nil { serverErr(w, err); return }
 	ok(w, b)
 }
 func (h *BuildingHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.Delete(r.Context(), pathLast(r.URL.Path)); err != nil { serverErr(w, err); return }
+	if err := h.repo.Delete(r.Context(), pathID(r.URL.Path)); err != nil { serverErr(w, err); return }
 	ok(w, M{"status": "deleted"})
 }
 
@@ -102,7 +98,7 @@ func (h *DeviceHandler) List(w http.ResponseWriter, r *http.Request) {
 	ok(w, list)
 }
 func (h *DeviceHandler) Get(w http.ResponseWriter, r *http.Request) {
-	d, err := h.repo.GetByID(r.Context(), pathLast(r.URL.Path))
+	d, err := h.repo.GetByID(r.Context(), pathID(r.URL.Path))
 	if err != nil { notFound(w, "设备不存在"); return }
 	ok(w, d)
 }
@@ -115,13 +111,67 @@ func (h *DeviceHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *DeviceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var d domain.Device
 	if err := json.NewDecoder(r.Body).Decode(&d); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
-	d.ID = pathLast(r.URL.Path)
+	d.ID = pathID(r.URL.Path)
 	if err := h.repo.Update(r.Context(), &d); err != nil { serverErr(w, err); return }
 	ok(w, d)
 }
 func (h *DeviceHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.Delete(r.Context(), pathLast(r.URL.Path)); err != nil { serverErr(w, err); return }
+	if err := h.repo.Delete(r.Context(), pathID(r.URL.Path)); err != nil { serverErr(w, err); return }
 	ok(w, M{"status": "deleted"})
+}
+
+// dispatchHardware sends the control action to the physical device via the gateway.
+// It looks up the register's write_addr/write_code by command_code, builds a Modbus
+// write command, and transmits it through the device's gateway transport. Failures are
+// logged but not returned (best-effort dispatch; the control_record is the audit trail).
+func (h *DeviceHandler) dispatchHardware(ctx context.Context, devID int, action string) {
+	if h.gwMgr == nil {
+		return
+	}
+	var gwImei, gwType string
+	var nodeAddr, deviceNo int
+	err := h.pool.QueryRow(ctx,
+		`SELECT COALESCE(d.gateway_imei,''), COALESCE(d.gateway_type,'custom'),
+		        d.node_address, d.device_no
+		 FROM device d WHERE d.id = $1`, devID).
+		Scan(&gwImei, &gwType, &nodeAddr, &deviceNo)
+	if err != nil || gwImei == "" {
+		return
+	}
+	gw := h.gwMgr.GetGateway(gwImei)
+	if gw == nil || gw.Transport == nil || !gw.Transport.IsConnected() {
+		return
+	}
+	var writeAddr *int
+	var writeCode *string
+	err = h.pool.QueryRow(ctx,
+		`SELECT r.write_addr, r.write_code FROM register r
+		 JOIN device_properties dp ON dp.id=r.property_id
+		 WHERE dp.device_id=$1 AND r.write_addr>0 AND r.command_code=$2
+		 ORDER BY r.id LIMIT 1`, devID, action).Scan(&writeAddr, &writeCode)
+	if err != nil || writeAddr == nil || writeCode == nil {
+		slog.Warn("dispatchHardware: no register config", "dev", devID, "action", action)
+		return
+	}
+	dn := deviceNo & 0xFF
+	if dn == 0 && deviceNo != 0 {
+		slog.Warn("dispatchHardware: deviceNo truncated", "deviceNo", deviceNo, "dn", dn)
+	}
+	writeVal := uint16(0xFF00) // ON by default
+	switch action {
+	case "stop", "pause":
+		writeVal = 0x0000
+	}
+	cmd := modbus.BuildWriteCommand(byte(dn), modbus.CodeFromStr(*writeCode), uint16(*writeAddr), 1, writeVal)
+	if gwType == "custom" {
+		lora := []byte{byte(nodeAddr >> 8), byte(nodeAddr)}
+		cmd = append(lora, cmd...)
+	}
+	if _, err := gw.Transport.SendAndReceive(cmd); err != nil {
+		slog.Warn("gateway dispatch failed", "dev", devID, "gw", gwImei, "err", err)
+	} else {
+		slog.Info("gateway dispatch ok", "dev", devID, "gw", gwImei, "action", action)
+	}
 }
 
 func (h *DeviceHandler) Control(w http.ResponseWriter, r *http.Request) {
@@ -150,17 +200,25 @@ func (h *DeviceHandler) Control(w http.ResponseWriter, r *http.Request) {
 	case "stop":
 		controlVal = "关机"
 		deviceStatus = "关机"
+	case "restart":
+		controlVal = "重启"
+		deviceStatus = "开机"
+	case "pause":
+		controlVal = "暂停"
+		deviceStatus = "暂停"
+	case "resume":
+		controlVal = "恢复"
+		deviceStatus = "开机"
+	default:
+		controlVal = body.Action
 	}
-	var devName, bldName, projName, gwImei, gwType string
-	var nodeAddr, deviceNo int
+	var devName, bldName, projName string
 	err := h.pool.QueryRow(r.Context(), `
-		SELECT d.name, b.name, COALESCE(p.name, ''),
-		       COALESCE(d.gateway_imei,''), COALESCE(d.gateway_type,'custom'),
-		       d.node_address, d.device_no
+		SELECT d.name, b.name, COALESCE(p.name, '')
 		FROM device d
 		JOIN building b ON b.id = d.building_id
 		JOIN project p ON p.id = b.project_id
-		WHERE d.id = $1`, id).Scan(&devName, &bldName, &projName, &gwImei, &gwType, &nodeAddr, &deviceNo)
+		WHERE d.id = $1`, id).Scan(&devName, &bldName, &projName)
 	if err != nil {
 		notFound(w, "设备不存在")
 		return
@@ -174,32 +232,8 @@ func (h *DeviceHandler) Control(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try hardware dispatch via gateway
-	if h.gwMgr != nil && gwImei != "" {
-		gw := h.gwMgr.GetGateway(gwImei)
-		if gw != nil && gw.Transport != nil && gw.Transport.IsConnected() {
-			var writeAddr *int
-			var writeCode *string
-			err := h.pool.QueryRow(r.Context(),
-				`SELECT r.write_addr, r.write_code FROM register r
-				 JOIN device_properties dp ON dp.id=r.property_id
-				 WHERE dp.device_id=$1 AND r.write_addr>0 AND r.command_code=$2
-				 ORDER BY r.id LIMIT 1`, id, body.Action).Scan(&writeAddr, &writeCode)
-			if err == nil && writeAddr != nil && writeCode != nil {
-				dn := deviceNo & 0xFF
-				cmd := modbus.BuildWriteCommand(byte(dn), modbus.CodeFromStr(*writeCode), uint16(*writeAddr), 1)
-				if gwType == "custom" {
-					lora := []byte{byte(nodeAddr >> 8), byte(nodeAddr)}
-					cmd = append(lora, cmd...)
-				}
-				if _, err := gw.Transport.SendAndReceive(cmd); err != nil {
-					slog.Warn("gateway dispatch failed", "dev", id, "gw", gwImei, "err", err)
-				} else {
-					slog.Info("gateway dispatch ok", "dev", id, "gw", gwImei, "action", body.Action)
-				}
-			}
-		}
-	}
+	// Dispatch to physical device via gateway (best-effort).
+	h.dispatchHardware(r.Context(), id, body.Action)
 
 	if deviceStatus != "" {
 		if _, err := h.pool.Exec(r.Context(), `UPDATE device SET device_status=$1 WHERE id=$2`, deviceStatus, id); err != nil {
@@ -220,7 +254,7 @@ func (h *PropertyHandler) List(w http.ResponseWriter, r *http.Request) {
 	ok(w, list)
 }
 func (h *PropertyHandler) Get(w http.ResponseWriter, r *http.Request) {
-	p, err := h.repo.GetByID(r.Context(), pathLast(r.URL.Path))
+	p, err := h.repo.GetByID(r.Context(), pathID(r.URL.Path))
 	if err != nil { notFound(w, "属性不存在"); return }
 	ok(w, p)
 }
@@ -233,12 +267,12 @@ func (h *PropertyHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *PropertyHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var p domain.DeviceProperty
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
-	p.ID = pathLast(r.URL.Path)
+	p.ID = pathID(r.URL.Path)
 	if err := h.repo.Update(r.Context(), &p); err != nil { serverErr(w, err); return }
 	ok(w, p)
 }
 func (h *PropertyHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.Delete(r.Context(), pathLast(r.URL.Path)); err != nil { serverErr(w, err); return }
+	if err := h.repo.Delete(r.Context(), pathID(r.URL.Path)); err != nil { serverErr(w, err); return }
 	ok(w, M{"status": "deleted"})
 }
 
@@ -253,7 +287,7 @@ func (h *RegisterHandler) List(w http.ResponseWriter, r *http.Request) {
 	ok(w, list)
 }
 func (h *RegisterHandler) Get(w http.ResponseWriter, r *http.Request) {
-	reg, err := h.repo.GetByID(r.Context(), pathLast(r.URL.Path))
+	reg, err := h.repo.GetByID(r.Context(), pathID(r.URL.Path))
 	if err != nil { notFound(w, "寄存器不存在"); return }
 	ok(w, reg)
 }
@@ -266,11 +300,11 @@ func (h *RegisterHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *RegisterHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var reg domain.Register
 	if err := json.NewDecoder(r.Body).Decode(&reg); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
-	reg.ID = pathLast(r.URL.Path)
+	reg.ID = pathID(r.URL.Path)
 	if err := h.repo.Update(r.Context(), &reg); err != nil { serverErr(w, err); return }
 	ok(w, reg)
 }
 func (h *RegisterHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.Delete(r.Context(), pathLast(r.URL.Path)); err != nil { serverErr(w, err); return }
+	if err := h.repo.Delete(r.Context(), pathID(r.URL.Path)); err != nil { serverErr(w, err); return }
 	ok(w, M{"status": "deleted"})
 }

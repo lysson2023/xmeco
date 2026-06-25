@@ -1,14 +1,14 @@
 import { useState } from 'react';
-import { message } from 'antd';
 import { useNavigate } from 'react-router-dom';
+import { message } from 'antd';
 import api from '../api/client';
 import './Login.css';
 
 export default function LoginPage() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const navigate = useNavigate();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,7 +22,7 @@ export default function LoginPage() {
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('user', JSON.stringify(res.data.user));
       message.success('登录成功');
-      window.location.href = '/';
+      navigate('/', { replace: true });
     } catch (err: any) {
       const msg = err?.response?.data?.error || '登录失败';
       message.error(msg || '登录失败');

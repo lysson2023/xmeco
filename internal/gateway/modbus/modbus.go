@@ -113,21 +113,24 @@ func CodeFromStr(s string) byte {
 		return 0x05
 	case "06":
 		return 0x06
-	case "10", "0F":
+	case "10":
 		return 0x10
+	case "0F":
+		return 0x0F
 	default:
 		return 0x06
 	}
 }
 
 // BuildWriteCommand builds a Modbus write command based on the function code.
-func BuildWriteCommand(devAddr byte, funcCode byte, addr uint16, count uint16) []byte {
+// value is the register value to write (e.g., 0xFF00 for ON, 0x0000 for OFF).
+func BuildWriteCommand(devAddr byte, funcCode byte, addr uint16, count uint16, value uint16) []byte {
 	switch funcCode {
 	case 0x05, 0x06:
-		return BuildWriteSingleCommand(devAddr, addr, 0xFF00)
+		return BuildWriteSingleCommand(devAddr, addr, value)
 	case 0x10, 0x0F:
-		return BuildWriteMultiCommand(devAddr, addr, count, []byte{0xFF, 0x00})
+		return BuildWriteMultiCommand(devAddr, addr, count, []byte{byte(value >> 8), byte(value)})
 	default:
-		return BuildWriteSingleCommand(devAddr, addr, 0xFF00)
+		return BuildWriteSingleCommand(devAddr, addr, value)
 	}
 }

@@ -3,7 +3,6 @@ import { ConfigProvider, App as AntdApp } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import LoginPage from './pages/Login';
 import MainLayout from './layouts/Main';
-import Dashboard from './pages/Dashboard';
 import Projects from './pages/Projects';
 import Buildings from './pages/Buildings';
 import Devices from './pages/Devices';
@@ -16,6 +15,7 @@ import Users from './pages/Users';
 import Agents from './pages/Agents';
 import Permissions from './pages/Permissions';
 import MultiAgent from './pages/MultiAgent';
+import Dashboard from './pages/Screen';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -26,7 +26,8 @@ function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/" element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
-              <Route index element={<Dashboard />} />
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
               <Route path="projects" element={<Projects />} />
               <Route path="buildings" element={<Buildings />} />
               <Route path="devices" element={<Devices />} />

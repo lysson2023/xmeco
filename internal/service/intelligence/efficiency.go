@@ -6,7 +6,17 @@ import (
 	"log/slog"
 )
 
+// devRow holds a device row from the initial query.
+type devRow struct {
+	id         int
+	name       string
+	deviceType string
+	ratedKW    float64
+}
+
 // AnalyzeEfficiency evaluates each device's efficiency based on type-specific benchmarks.
+// When device_telemetry contains actual power readings they are used for load %
+// and COP calculation; otherwise the function falls back to rated-power estimates.
 func (s *Service) AnalyzeEfficiency(ctx context.Context) ([]EfficiencyItem, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT d.id, d.name, d.device_type, 
@@ -19,47 +29,113 @@ func (s *Service) AnalyzeEfficiency(ctx context.Context) ([]EfficiencyItem, erro
 	}
 	defer rows.Close()
 
-	var items []EfficiencyItem
+	// Collect all devices first so we can batch-query telemetry.
+	var devs []devRow
 	for rows.Next() {
-		var item EfficiencyItem
-		var ratedKW float64
-		if err := rows.Scan(&item.DeviceID, &item.DeviceName, &item.DeviceType, &ratedKW); err != nil {
+		var d devRow
+		if err := rows.Scan(&d.id, &d.name, &d.deviceType, &d.ratedKW); err != nil {
 			slog.Warn("AnalyzeEfficiency scan failed", "err", err)
 			continue
 		}
+		devs = append(devs, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
-		// Compute efficiency based on device type benchmarks.
-		// NOTE: Current implementation uses simulated values (DeviceID%N) for demonstration.
-		// TODO: Replace with actual energy consumption data from device_telemetry.
-		switch item.DeviceType {
-		case "主机":
-			item.COP = 4.5 + float64(item.DeviceID%10)*0.1 // simulated 4.5-5.4
-			item.PowerKW = round2(ratedKW * 0.75)           // assume 75% load
-			item.LoadPct = 75
-			item.Efficiency = round2(item.COP / 6.0 * 100)  // benchmark COP=6.0
-		case "冷冻泵", "冷却泵", "二次泵":
-			item.PowerKW = round2(ratedKW * 0.70)
-			item.LoadPct = 70
-			item.Efficiency = 80 + float64(item.DeviceID%15) // 80-94
-			item.COP = 0
-		case "冷却塔":
-			item.PowerKW = round2(ratedKW * 0.65)
-			item.LoadPct = 65
-			item.Efficiency = 75 + float64(item.DeviceID%10) // 75-84
-			item.COP = 0
-		case "电表":
-			item.PowerKW = round2(ratedKW * 0.85)
-			item.LoadPct = 85
-			item.Efficiency = 95
-			item.COP = 0
-		default:
-			item.PowerKW = round2(ratedKW * 0.6)
-			item.LoadPct = 60
-			item.Efficiency = 85
-			item.COP = 0
+	// No devices in DB → show demo data for interactive exploration.
+	if len(devs) == 0 {
+		return generateDemoEfficiency(), nil
+	}
+
+	// Batch query latest power telemetry for all relevant devices.
+	powerMap := s.fetchLatestPowerMap(ctx)
+
+	var items []EfficiencyItem
+	for _, d := range devs {
+		item := EfficiencyItem{
+			DeviceID:   d.id,
+			DeviceName: d.name,
+			DeviceType: d.deviceType,
+		}
+		ratedKW := d.ratedKW
+		if ratedKW <= 0 {
+			ratedKW = estimatePower(d.deviceType)
 		}
 
-		// Determine status
+		actualPower, hasTelemetry := powerMap[d.id]
+
+		switch d.deviceType {
+		case "主机":
+			designCOP := 5.0
+			if hasTelemetry && actualPower > 0 {
+				item.PowerKW = round2(actualPower)
+				item.LoadPct = round2(actualPower / ratedKW * 100)
+				// Cooling capacity from rated power × design COP × part-load factor.
+				// Non-linear: chillers peak at 70–80 % load, drop off at low loads.
+				coolingKW := ratedKW * designCOP * chillerPartLoadFactor(item.LoadPct)
+				item.COP = round2(coolingKW / item.PowerKW)
+				item.Efficiency = round2(item.COP / designCOP * 100)
+			} else {
+				item.PowerKW = round2(ratedKW * 0.75)
+				item.LoadPct = 75
+				item.COP = round2(4.5 + ratedKW*0.001)
+				item.Efficiency = round2(item.COP / designCOP * 100)
+			}
+
+		case "冷冻泵", "冷却泵", "二次泵":
+			if hasTelemetry && actualPower > 0 {
+				item.PowerKW = round2(actualPower)
+				item.LoadPct = round2(actualPower / ratedKW * 100)
+			} else {
+				item.PowerKW = round2(ratedKW * 0.70)
+				item.LoadPct = 70
+			}
+			item.COP = 0
+			item.Efficiency = pumpEfficiencyScore(item.LoadPct)
+
+		case "冷却塔":
+			if hasTelemetry && actualPower > 0 {
+				item.PowerKW = round2(actualPower)
+				item.LoadPct = round2(actualPower / ratedKW * 100)
+			} else {
+				item.PowerKW = round2(ratedKW * 0.65)
+				item.LoadPct = 65
+			}
+			item.COP = 0
+			item.Efficiency = towerEfficiencyScore(item.LoadPct)
+
+		case "电表":
+			if hasTelemetry && actualPower > 0 {
+				item.PowerKW = round2(actualPower)
+				item.LoadPct = round2(actualPower / ratedKW * 100)
+			} else {
+				item.PowerKW = round2(ratedKW * 0.85)
+				item.LoadPct = 85
+			}
+			item.COP = 0
+			item.Efficiency = 95
+
+		default:
+			if hasTelemetry && actualPower > 0 {
+				item.PowerKW = round2(actualPower)
+				item.LoadPct = round2(actualPower / ratedKW * 100)
+			} else {
+				item.PowerKW = round2(ratedKW * 0.6)
+				item.LoadPct = 60
+			}
+			item.COP = 0
+			item.Efficiency = 85
+		}
+
+		// Clamp to valid range.
+		if item.Efficiency > 100 {
+			item.Efficiency = 100
+		}
+		if item.Efficiency < 0 {
+			item.Efficiency = 0
+		}
+
 		switch {
 		case item.Efficiency >= 85:
 			item.Status = "优"
@@ -69,21 +145,86 @@ func (s *Service) AnalyzeEfficiency(ctx context.Context) ([]EfficiencyItem, erro
 			item.Status = "差"
 		}
 
-		// If no rated power, estimate from device type
-		if ratedKW == 0 {
-			item.PowerKW = estimatePower(item.DeviceType)
-			item.LoadPct = 65
-		}
-
 		items = append(items, item)
 	}
 
-	// If no data, generate demo data
-	if len(items) == 0 {
-		items = generateDemoEfficiency()
-	}
+	return items, nil
+}
 
-	return items, rows.Err()
+// fetchLatestPowerMap queries device_telemetry for the latest power reading of
+// every device. It prefers metrics whose name contains "功率" (power).
+func (s *Service) fetchLatestPowerMap(ctx context.Context) map[int]float64 {
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT ON (device_id) device_id, value
+		 FROM device_telemetry
+		 WHERE metric LIKE $1
+		 ORDER BY device_id, ts DESC`, "%功率%")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	m := make(map[int]float64)
+	for rows.Next() {
+		var id int
+		var v float64
+		if err := rows.Scan(&id, &v); err != nil {
+			continue
+		}
+		m[id] = v
+	}
+	return m
+}
+
+// chillerPartLoadFactor returns the cooling output fraction (0–1) for a given
+// electrical load percentage, based on a typical chiller part-load curve.
+// Efficiency peaks near 70–80 % load; very low loads see significant penalty.
+func chillerPartLoadFactor(loadPct float64) float64 {
+	l := loadPct
+	if l > 100 {
+		l = 100 // cannot exceed rated capacity
+	}
+	l = l / 100
+	switch {
+	case loadPct >= 70:
+		return l * 0.98
+	case loadPct >= 50:
+		return l * 0.95
+	case loadPct >= 30:
+		return l * 0.88
+	default:
+		return l * 0.75
+	}
+}
+
+// pumpEfficiencyScore returns an efficiency score (0–100) for a pump based on
+// its load percentage. Pumps are most efficient in the 60–85 % load range.
+func pumpEfficiencyScore(loadPct float64) float64 {
+	switch {
+	case loadPct >= 60 && loadPct <= 85:
+		return 88 + (loadPct-60)*0.2 // 88–93 in sweet spot
+	case loadPct > 85:
+		return 93 - (loadPct-85)*0.6 // gradually drops above 85%
+	case loadPct > 30:
+		return 75 + (loadPct-30)*0.4 // ramps up
+	default:
+		return 65 // very low load → poor efficiency
+	}
+}
+
+// towerEfficiencyScore returns an efficiency score (0–100) for a cooling tower.
+// Towers are designed for ~65–80 % load; outside that range efficiency drops.
+func towerEfficiencyScore(loadPct float64) float64 {
+	switch {
+	case loadPct >= 60 && loadPct <= 85:
+		return 82 + (loadPct-60)*0.3 // 82–89 in design range
+	case loadPct > 85:
+		return 89 - (loadPct-85)*0.5
+	case loadPct > 30:
+		return 70 + (loadPct-30)*0.4
+	default:
+		return 60
+	}
 }
 
 func estimatePower(deviceType string) float64 {

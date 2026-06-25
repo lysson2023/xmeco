@@ -12,9 +12,12 @@
 import { ref, onMounted } from 'vue'; import { api } from '../../api/client';
 const dev = ref({} as any); const props = ref([] as any[])
 onMounted(async () => {
-  const pages = getCurrentPages(); const id = (pages[pages.length-1] as any).options.id
-  const [d, p] = await Promise.all([api.get('/devices/'+id), api.get('/properties?device_id='+id)])
-  dev.value = d.data as any; props.value = p.data as any
+  const pages = getCurrentPages(); const id = (pages[pages.length-1] as any).options?.id
+  if (!id) { uni.showToast({ title: '设备ID无效', icon: 'none' }); return }
+  try {
+    const [d, p] = await Promise.all([api.get('/devices/'+id), api.get('/properties?device_id='+id)])
+    dev.value = d.data as any; props.value = p.data as any
+  } catch { uni.showToast({ title: '加载失败', icon: 'none' }) }
 })
 const control = async (a: string) => { await api.post('/devices/'+dev.value.id+'/control', { action: a }); uni.showToast({ title: '已发送' }) }
 </script>

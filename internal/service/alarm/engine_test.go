@@ -105,14 +105,48 @@ func TestTriggeredRange(t *testing.T) {
 	}
 }
 
-func TestParseFloat(t *testing.T) {
-	tests := []struct{ s string; want float64 }{
-		{"200", 200}, {"3.5", 3.5}, {"0.01", 0.01}, {"", 0}, {"abc", 0},
+func TestParseFloatOK(t *testing.T) {
+	tests := []struct {
+		s        string
+		wantVal  float64
+		wantOK   bool
+	}{
+		{"200", 200, true},
+		{"3.5", 3.5, true},
+		{"0.01", 0.01, true},
+		{"0", 0, true},
+		{"-10", -10, true},
+		{"", 0, false},
+		{"abc", 0, false},
+		{"12.34.56", 0, false},
+		{" 5 ", 0, false},
 	}
 	for _, tt := range tests {
-		if got := parseFloat(tt.s); got != tt.want {
-			t.Errorf("parseFloat(%q) = %f, want %f", tt.s, got, tt.want)
+		gotVal, gotOK := parseFloatOK(tt.s)
+		if gotVal != tt.wantVal || gotOK != tt.wantOK {
+			t.Errorf("parseFloatOK(%q) = (%f, %v), want (%f, %v)", tt.s, gotVal, gotOK, tt.wantVal, tt.wantOK)
 		}
+	}
+}
+
+func TestTriggeredRangeSkipOnParseFailure(t *testing.T) {
+	// BUG6 regression: when range bounds fail to parse, the rule must be
+	// skipped (return false) instead of falling back to 0 and false-triggering.
+	if triggered("range", 100.0, 0, "abc", "200") {
+		t.Error("range with invalid min should be skipped (return false)")
+	}
+	if triggered("range", 100.0, 0, "200", "abc") {
+		t.Error("range with invalid max should be skipped (return false)")
+	}
+	if triggered("range", 100.0, 0, "abc", "def") {
+		t.Error("range with both invalid should be skipped (return false)")
+	}
+	if triggered("range", 0.0, 0, "abc", "200") {
+		t.Error("range with invalid min should NOT trigger even when val=0")
+	}
+	// Sanity: valid bounds still work
+	if !triggered("range", 1.0, 0, "10", "20") {
+		t.Error("range with valid bounds should still work")
 	}
 }
 

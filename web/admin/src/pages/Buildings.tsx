@@ -4,7 +4,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 
-interface Building { id: number; project_id: number; name: string; save_rate: number; created_at: string }
+interface Building { id: number; project_id: number; name: string; outdoor_temp: number; outdoor_humidity: number; save_rate: number; created_at: string }
 interface Device { id: number; building_id: number; name: string }
 
 export default function Buildings() {
@@ -87,7 +87,7 @@ export default function Buildings() {
     {
       title: '操作', render: (_: any, r: Building) => (
         <Space size="small">
-          <a onClick={() => { setEditing(r); form.setFieldsValue({ ...r, save_rate: r.save_rate ? (r.save_rate * 100).toFixed(1) : '' }); setModalOpen(true); }}>编辑</a>
+          <a onClick={() => { setEditing(r); form.setFieldsValue({ ...r, save_rate: r.save_rate ? (r.save_rate * 100).toFixed(1) : '', outdoor_temp: r.outdoor_temp, outdoor_humidity: r.outdoor_humidity }); setModalOpen(true); }}>编辑</a>
           <a onClick={() => navigate(`/startup-plans?building_id=${r.id}`)}>启停</a>
           <Popconfirm title="确定删除?" onConfirm={() => del(r.id)}><a style={{ color: 'red' }}>删除</a></Popconfirm>
         </Space>

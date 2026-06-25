@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:screen": "vite screen-src",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

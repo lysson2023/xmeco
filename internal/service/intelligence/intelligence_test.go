@@ -3,6 +3,8 @@ package intelligence
 import (
 	"context"
 	"testing"
+
+	"github.com/pashagolub/pgxmock/v4"
 )
 
 func TestEstimateWetBulb(t *testing.T) {
@@ -106,7 +108,15 @@ func TestPrioBySaveKW(t *testing.T) {
 }
 
 func TestForecastLoad(t *testing.T) {
-	s := &Service{} // nil pool, forecast doesn't use DB
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+
+	// estimateSystemLoad query: sum of chiller rated power
+	cols := []string{"total"}
+	mock.ExpectQuery(`SELECT COALESCE\(SUM`).
+		WillReturnRows(pgxmock.NewRows(cols).AddRow(600.0))
+
+	s := &Service{pool: mock}
 
 	forecast := s.ForecastLoad(context.TODO(), 28.0)
 	if len(forecast) != 24 {
@@ -178,6 +188,145 @@ func TestBuildSummary(t *testing.T) {
 	// Should mention device count
 	if len(summary) < 20 {
 		t.Errorf("summary too short: %q", summary)
+	}
+}
+
+func TestPumpEfficiencyScore(t *testing.T) {
+	tests := []struct {
+		name    string
+		loadPct float64
+		wantMin float64
+		wantMax float64
+	}{
+		{"sweet spot low", 60, 88, 90},
+		{"sweet spot mid", 75, 90, 93},
+		{"sweet spot high", 85, 88, 95},
+		{"overload", 95, 86, 90},
+		{"low load", 40, 78, 82},
+		{"very low", 20, 60, 70},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := pumpEfficiencyScore(tt.loadPct)
+			if got < tt.wantMin || got > tt.wantMax {
+				t.Errorf("pumpEfficiencyScore(%.0f) = %.1f, want [%.1f–%.1f]", tt.loadPct, got, tt.wantMin, tt.wantMax)
+			}
+		})
+	}
+}
+
+func TestTowerEfficiencyScore(t *testing.T) {
+	tests := []struct {
+		name    string
+		loadPct float64
+		wantMin float64
+		wantMax float64
+	}{
+		{"design low", 60, 82, 84},
+		{"design mid", 75, 86, 89},
+		{"design high", 85, 85, 91},
+		{"overload", 95, 83, 87},
+		{"low load", 40, 73, 77},
+		{"very low", 20, 55, 65},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := towerEfficiencyScore(tt.loadPct)
+			if got < tt.wantMin || got > tt.wantMax {
+				t.Errorf("towerEfficiencyScore(%.0f) = %.1f, want [%.1f–%.1f]", tt.loadPct, got, tt.wantMin, tt.wantMax)
+			}
+		})
+	}
+}
+
+func TestChillerPartLoadFactor(t *testing.T) {
+	tests := []struct {
+		name    string
+		loadPct float64
+		wantMin float64
+		wantMax float64
+	}{
+		{"full load", 100, 0.97, 1.0},
+		{"sweet spot", 75, 0.72, 0.76},
+		{"mid load", 55, 0.50, 0.55},
+		{"low load", 40, 0.33, 0.38},
+		{"very low", 20, 0.13, 0.17},
+		{"overload capped", 130, 0.97, 1.0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := chillerPartLoadFactor(tt.loadPct)
+			if got < tt.wantMin || got > tt.wantMax {
+				t.Errorf("chillerPartLoadFactor(%.0f) = %.3f, want [%.3f–%.3f]", tt.loadPct, got, tt.wantMin, tt.wantMax)
+			}
+		})
+	}
+}
+
+func TestAnalyzeEfficiencyWithDevices(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+
+	// Initial device query
+	devCols := []string{"id", "name", "device_type", "rated"}
+	mock.ExpectQuery(`SELECT d\.id, d\.name, d\.device_type`).
+		WillReturnRows(pgxmock.NewRows(devCols).
+			AddRow(1, "约克主机1", "主机", 140.0).
+			AddRow(2, "冷冻泵1", "冷冻泵", 30.0).
+			AddRow(3, "冷却塔1", "冷却塔", 7.5))
+
+	// Telemetry query for power metrics
+	telCols := []string{"device_id", "value"}
+	mock.ExpectQuery(`SELECT DISTINCT ON \(device_id\) device_id, value`).
+		WithArgs("%功率%").
+		WillReturnRows(pgxmock.NewRows(telCols).
+			AddRow(1, 105.0).  // chiller running ~75%
+			AddRow(2, 22.5))   // pump running ~75%
+	// tower has no telemetry → falls back to rated
+
+	s := &Service{pool: mock}
+	items, err := s.AnalyzeEfficiency(context.TODO())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(items))
+	}
+
+	// Chiller (host) with telemetry — 140kW rated, 105kW actual → ~75% load
+	chiller := items[0]
+	if chiller.PowerKW <= 0 {
+		t.Error("chiller should have power from telemetry")
+	}
+	if chiller.LoadPct <= 0 {
+		t.Error("chiller should have load% from telemetry")
+	}
+	if chiller.COP <= 0 {
+		t.Error("chiller should have COP")
+	}
+	// COP must NOT be a flat 5.0 — should reflect part-load curve.
+	if chiller.COP == 5.0 {
+		t.Error("chiller COP should vary with load, not be flat 5.0")
+	}
+	// At 75 % load with part-load factor ~0.98, expected COP ≈ 4.9
+	if chiller.COP < 4.0 || chiller.COP > 5.5 {
+		t.Errorf("chiller COP out of reasonable range: %.2f", chiller.COP)
+	}
+
+	// Pump with telemetry
+	pump := items[1]
+	if round2(pump.PowerKW) != 22.5 {
+		t.Errorf("pump power should be 22.5 from telemetry, got %.1f", pump.PowerKW)
+	}
+
+	// Tower without telemetry — should fall back to rated
+	tower := items[2]
+	if tower.PowerKW <= 0 {
+		t.Error("tower should have power from rated fallback")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
 	}
 }
 

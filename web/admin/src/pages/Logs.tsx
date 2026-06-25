@@ -60,7 +60,7 @@ export default function Logs() {
 
   const fetchData = async () => {
     setLoading(true);
-    var params = '?start='+(dateRange[0]?dateRange[0].format('YYYY-MM-DD'):'')+'&end='+(dateRange[1]?dateRange[1].format('YYYY-MM-DD'):'');
+    let params = '?start='+(dateRange[0]?dateRange[0].format('YYYY-MM-DD'):'')+'&end='+(dateRange[1]?dateRange[1].format('YYYY-MM-DD'):'');
     if(selDevice) params += '&device_id='+selDevice;
     if(interval&&interval!=='raw') params += '&interval='+interval;
     if(activeTab==='telemetry'){
@@ -73,7 +73,7 @@ export default function Logs() {
   };
 
   const exportCSV = async () => {
-    var params = '?start='+(dateRange[0]?dateRange[0].format('YYYY-MM-DD'):'')+'&end='+(dateRange[1]?dateRange[1].format('YYYY-MM-DD'):'');
+    let params = '?start='+(dateRange[0]?dateRange[0].format('YYYY-MM-DD'):'')+'&end='+(dateRange[1]?dateRange[1].format('YYYY-MM-DD'):'');
     if(selDevice) params += '&device_id='+selDevice;
     if(interval&&interval!=='raw') params += '&interval='+interval;
     const path = '/export/'+(activeTab==='controls'?'controls':'telemetry')+params;
@@ -134,14 +134,14 @@ export default function Logs() {
         <div><div style={{marginBottom:2,color:'#666',fontSize:11}}>楼宇</div><Select style={{width:160}} placeholder="楼宇" allowClear value={selBuilding} disabled={!selProject} onChange={v=>setSelBuilding(v?Number(v):null)} options={buildings.map(b=>({value:b.id,label:b.name}))}/></div>
         <div><div style={{marginBottom:2,color:'#666',fontSize:11}}>设备</div><Select style={{width:150}} placeholder="设备" allowClear value={selDevice} disabled={!selBuilding} onChange={v=>setSelDevice(v?Number(v):null)} options={devices.map(d=>({value:d.id,label:d.name}))}/></div>
         <div><div style={{marginBottom:2,color:'#666',fontSize:11}}>日期范围</div><DatePicker.RangePicker size="middle" value={dateRange as any} onChange={(v:any)=>setDateRange(v||[dayjs().subtract(7,'day'),dayjs()])}/></div>
-        {activeTab==='telemetry' && <div><div style={{marginBottom:2,color:'#666',fontSize:11}}>聚合</div><Select style={{width:80}} value={interval} onChange={v=>setInterval(v)} options={[{value:'raw',label:'原始'},{value:'hour',label:'小时'},{value:'day',label:'天'},{value:'month',label:'月'},{value:'year',label:'年'}]}/></div>}
+        {activeTab==='telemetry' && <div><div style={{marginBottom:2,color:'#666',fontSize:11}}>聚合</div><Select style={{width:80}} value={interval} onChange={v=>setInterval(v)} options={[{value:'raw',label:'原始'},{value:'minute',label:'分钟'},{value:'hour',label:'小时'},{value:'day',label:'天'},{value:'week',label:'周'},{value:'month',label:'月'},{value:'year',label:'年'}]}/></div>}
         <Button type="primary" icon={<SearchOutlined/>} onClick={fetchData}>查询</Button>
         {activeTab!=='stats' && <Button icon={<DownloadOutlined/>} onClick={exportCSV}>导出CSV</Button>}
         {selDevice && <span style={{paddingBottom:2,color:'#006875',fontWeight:500}}>当前: {getProjName()} → {getBldName()} → {getDeviceName()}</span>}
       </div>
       <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
-        { key:'telemetry', label:'设备数据', children:<Table rowKey={(r:any)=>`${r.ts}-${r.metric}-${r.value??r.avg}`} columns={telemetryCols} dataSource={data} loading={loading} scroll={{x:700}} size="small"/> },
-        { key:'controls', label:'操作日志', children:<Table rowKey={(r:any)=>`${r.created_at}-${r.device_name}-${r.control_value}`} columns={controlCols} dataSource={data} loading={loading} scroll={{x:1000}} size="small"/> },
+        { key:'telemetry', label:'设备数据', children:<Table rowKey={(_:any,i:number)=>`${_?.ts??i}-${_?.metric??''}-${_?.value??_?.avg??i}-${i}`} columns={telemetryCols} dataSource={data} loading={loading} scroll={{x:700}} size="small"/> },
+        { key:'controls', label:'操作日志', children:<Table rowKey={(_:any,i:number)=>`${_?.created_at??i}-${_?.device_name??''}-${_?.control_value??''}-${i}`} columns={controlCols} dataSource={data} loading={loading} scroll={{x:1000}} size="small"/> },
         { key:'stats', label:'数据统计', children:<Table rowKey="metric" columns={statCols} dataSource={stats} loading={loading} size="small"/> },
       ]}/>
     </div>

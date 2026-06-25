@@ -4,7 +4,9 @@ miniapp/node_modules/
 
 # Build
 server.exe
+server.exe~
 server2.exe
+*.exe~
 web/admin/dist/
 web/dashboard/dist/
 
@@ -22,3 +24,6 @@ Thumbs.db
 
 # Env
 .env
+
+# Windows reserved names
+nul

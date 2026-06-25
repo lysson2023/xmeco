@@ -1,7 +1,9 @@
 ﻿const BASE = '/api/v1'
 let token = ''
 
-async function request(url: string, method: string, data?: any): Promise<any> {
+type HttpMethod = 'OPTIONS' | 'GET' | 'HEAD' | 'POST' | 'PUT' | 'DELETE' | 'TRACE' | 'CONNECT'
+
+async function request(url: string, method: HttpMethod, data?: any): Promise<any> {
   const r = await uni.request({ url, method, data, header: { Authorization: 'Bearer ' + getToken() } })
   if (r.statusCode === 401) {
     uni.removeStorageSync('token')

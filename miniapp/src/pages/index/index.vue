@@ -27,6 +27,7 @@
   <view class="actions">
     <view class="btn" @click="goDevices"><text>设备管理</text></view>
     <view class="btn" @click="goAlarms"><text>告警中心</text></view>
+    <view class="btn" @click="goHistory"><text>历史数据</text></view>
   </view>
 </view></template>
 <script setup lang="ts">
@@ -50,6 +51,7 @@ onMounted(async () => {
 });
 const goDevices = () => uni.switchTab({ url: '/pages/devices/devices' })
 const goAlarms = () => uni.switchTab({ url: '/pages/alarms/alarms' })
+const goHistory = () => uni.navigateTo({ url: '/pages/history/history' })
 </script>
 <style>
 .home { padding: 20rpx; background: #f5f7fa; min-height: 100vh; }

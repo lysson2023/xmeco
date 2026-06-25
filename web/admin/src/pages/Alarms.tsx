@@ -58,7 +58,7 @@ export default function Alarms() {
   useEffect(() => { if(selBuilding){api.get('/devices?building_id='+selBuilding).then(r=>setDevices(r.data));if(!restoring.current){setSelDevice(null);setSelProperty(null);}}else{setDevices([]);setSelDevice(null);setSelProperty(null);}}, [selBuilding]);
   useEffect(() => { if(selDevice){api.get('/properties?device_id='+selDevice).then(r=>setProperties(r.data));if(!restoring.current)setSelProperty(null);api.get('/alarm-logs?device_id='+selDevice).then(r=>setLogs(r.data));}else{setProperties([]);setSelProperty(null);setLogs([]);}}, [selDevice]);
   useEffect(() => {
-    if(selProperty){var p=properties.find(x=>x.id===selProperty);setSelPropDetail(p);setLoading(true);
+    if(selProperty){const p=properties.find(x=>x.id===selProperty);setSelPropDetail(p);setLoading(true);
       api.get('/alarm-rules?device_id='+selDevice).then(r=>{setRules(r.data);setLoading(false);});
     }else{setRules([]);setSelPropDetail(null);}
   }, [selProperty]);
@@ -71,7 +71,7 @@ export default function Alarms() {
   }, [selDevice]);
 
   const save = async (v: any) => {
-    var p: any = { name: v.name, device_id: selDevice, property_id: selProperty, enabled: v.enabled!==false,
+    const p: any = { name: v.name, device_id: selDevice, property_id: selProperty, enabled: v.enabled!==false,
       device_type: selPropDetail?.prop_type||'', metric: selPropDetail?.prop_name||'',
       condition: selPropDetail?.operation_type===OP_NUMERIC ? 'range' : 'eq', level: v.level||'warning',
       notify_users: JSON.stringify(v.notify_users||[]) };

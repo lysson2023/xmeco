@@ -176,18 +176,13 @@ func (s *Service) loadPriceConfig(ctx context.Context) ([]PricePeriod, error) {
 }
 
 // SavePriceConfig saves TOU pricing to DB.
+// Table electricity_price is created via migration 000011.
 func (s *Service) SavePriceConfig(ctx context.Context, periods []PricePeriod) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-
-	// Create table if not exists
-	_, _ = tx.Exec(ctx,
-		`CREATE TABLE IF NOT EXISTS electricity_price (
-			name VARCHAR(20), start_hour INT, end_hour INT, price DECIMAL(6,3),
-			PRIMARY KEY (name, start_hour))`)
 
 	_, err = tx.Exec(ctx, `DELETE FROM electricity_price`)
 	if err != nil {
