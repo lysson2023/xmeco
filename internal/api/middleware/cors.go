@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -22,15 +23,28 @@ func CORS(allowedOrigins string, next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqOrigin := r.Header.Get("Origin")
-		allowOrigin := ""
 		if wildcard {
-			allowOrigin = "*"
+			// Per Fetch spec, Access-Control-Allow-Origin:* cannot be used with credentials.
+			// If the request carries an Authorization header, echo the request origin instead
+			// of using "*", otherwise the browser will block the response.
+			if r.Header.Get("Authorization") != "" && reqOrigin != "" {
+				w.Header().Set("Access-Control-Allow-Origin", reqOrigin)
+				w.Header().Set("Vary", "Origin")
+				slog.Warn("CORS: wildcard origin replaced due to credentialed request", "origin", reqOrigin)
+			} else {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			}
 		} else if originMap[reqOrigin] {
-			allowOrigin = reqOrigin
-		}
-		if allowOrigin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
+			w.Header().Set("Access-Control-Allow-Origin", reqOrigin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		} else if reqOrigin != "" {
+			// Origin not in allowed list: do not set CORS headers (browser will block).
+			// Fall through to serve the request anyway (middleware logs are the caller's responsibility).
+		} else {
+			// No Origin header (same-origin request): use first allowed origin as fallback.
+			if len(origins) > 0 && origins[0] != "*" {
+				w.Header().Set("Access-Control-Allow-Origin", origins[0])
+			}
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")

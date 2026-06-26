@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Select, Input, InputNumber, Button, Spin, Tag, message, Modal, Switch } from 'antd';
 import {
   LogoutOutlined, UserOutlined, LockOutlined, ThunderboltOutlined,
@@ -7,16 +7,30 @@ import {
   ScheduleOutlined, RocketOutlined, FileTextOutlined, BulbOutlined,
   PlayCircleOutlined,
 } from '@ant-design/icons';
-import axios from 'axios';
+import { api, setAuth, isTokenExpired } from '../api/screenClient';
+import DataCenter from './DataCenter';
+import MaintenanceCenter from './MaintenanceCenter';
+import ErrorBoundary from '../components/ErrorBoundary';
+import { TOPO_ORDER, TOPO_COLORS, QUICK_MODES } from '../utils/constants';
 
-// ---- Global keyframes for fault flashing ----
-const styleSheet = document.createElement('style');
-styleSheet.textContent = `@keyframes faultPulse { 0%,100% { box-shadow: 0 0 4px #ff4d4f; } 50% { box-shadow: 0 0 14px #ff4d4f; } }`;
-document.head.appendChild(styleSheet);
+// ---- Global keyframes for fault flashing (inject once, guarded by ID) ----
+if (!document.getElementById('screen-fault-pulse-style')) {
+  const styleSheet = document.createElement('style');
+  styleSheet.id = 'screen-fault-pulse-style';
+  styleSheet.textContent = `@keyframes faultPulse { 0%,100% { box-shadow: 0 0 4px #ff4d4f; } 50% { box-shadow: 0 0 14px #ff4d4f; } }`;
+  document.head.appendChild(styleSheet);
+}
 
-// ---- Fully isolated API client (relative path, proxied in dev / same-origin in prod) ----
-const api = axios.create({ baseURL: '/api/v1' });
-const setAuth = (t: string) => { api.defaults.headers.common['Authorization'] = 'Bearer ' + t; };
+// ---- Module-level constants (avoid re-creation on each render) ----
+const TABS = [
+  { key: 'monitor', icon: <DashboardOutlined />, label: '监控中心' },
+  { key: 'data', icon: <DatabaseOutlined />, label: '数据中心' },
+  { key: 'maintain', icon: <ToolOutlined />, label: '维保中心' },
+  { key: 'task', icon: <ScheduleOutlined />, label: '任务中心' },
+  { key: 'decision', icon: <RocketOutlined />, label: '决策中心' },
+  { key: 'logs', icon: <FileTextOutlined />, label: '系统日志' },
+  { key: 'energy', icon: <BulbOutlined />, label: '能耗中心' },
+];
 
 export default function Screen() {
   // ---- Auth ----
@@ -35,21 +49,10 @@ export default function Screen() {
   const [devProps, setDevProps] = useState<any[]>([]);
   const [propsLoading, setPropsLoading] = useState(false);
 
-  const TABS = [
-    { key: 'monitor', icon: <DashboardOutlined />, label: '监控中心' },
-    { key: 'data', icon: <DatabaseOutlined />, label: '数据中心' },
-    { key: 'maintain', icon: <ToolOutlined />, label: '维保中心' },
-    { key: 'task', icon: <ScheduleOutlined />, label: '任务中心' },
-    { key: 'decision', icon: <RocketOutlined />, label: '决策中心' },
-    { key: 'logs', icon: <FileTextOutlined />, label: '系统日志' },
-    { key: 'energy', icon: <BulbOutlined />, label: '能耗中心' },
-  ];
-
-  const TOPO_ORDER = ['冷却塔', '冷却泵', '主机', '阀门', '冷冻泵', '二次泵'];
-  const TOPO_COLORS: Record<string, string> = {
-    '冷却塔': '#1677ff', '冷却泵': '#52c41a', '主机': '#fa8c16',
-    '阀门': '#722ed1', '冷冻泵': '#13c2c2', '二次泵': '#eb2f96',
-  };
+  // ---- Refs for race condition prevention ----
+  const fetchSeqRef = useRef(0);  // 请求序号，防止旧请求覆盖新数据
+  const openDevSeqRef = useRef(0); // 设备属性加载序号
+  const mountedRef = useRef(true); // 组件挂载标志，防止卸载后 setState
 
   // ---- Login ----
   const doLogin = async () => {
@@ -61,41 +64,74 @@ export default function Screen() {
       setAuth(t);
       localStorage.setItem('screen_token', t);
       localStorage.setItem('screen_user', uname);
+      setTab('monitor'); // 登录后确保从监控中心开始
       setLoggedIn(true);
     } catch { message.error('用户名或密码错误'); }
     finally { setLoginLoading(false); }
   };
 
-  // ---- Init: check for saved token ----
+  // ---- Init: check for saved token (validate expiry before trusting it) ----
   useEffect(() => {
+    mountedRef.current = true;
     const saved = localStorage.getItem('screen_token');
-    if (saved) {
+    if (saved && !isTokenExpired(saved)) {
       setAuth(saved);
       setUname(localStorage.getItem('screen_user') || '');
       setLoggedIn(true);
+    } else if (saved) {
+      localStorage.removeItem('screen_token');
+      localStorage.removeItem('screen_user');
     }
+    // Listen for 401 auto-logout (idempotent guard)
+    const handler = () => { if (mountedRef.current) setLoggedIn(prev => prev ? false : prev); };
+    window.addEventListener('screen-auth-expired', handler);
+    return () => {
+      mountedRef.current = false;
+      window.removeEventListener('screen-auth-expired', handler);
+    };
   }, []);
 
-  // ---- Fetch data ----
-  const fetch = useCallback(async () => {
+  // ---- Fetch screen data (race-safe via request sequence number) ----
+  const fetchData = useCallback(async () => {
     if (!loggedIn) return;
     setLoading(true);
+    const seq = ++fetchSeqRef.current; // 本次请求的序号
     try {
       const p: any = {}; if (pid) p.project_id = pid; if (bid) p.building_id = bid;
       const r = await api.get('/screen/data', { params: p });
+      // 仅当本次请求仍是最新请求时才更新数据，防止旧请求覆盖新数据
+      if (seq !== fetchSeqRef.current || !mountedRef.current) return;
       setData(r.data);
-      if (!pid && r.data.projects?.[0]) setPid(r.data.projects[0].id);
-    } catch { message.error('数据加载失败'); }
-    finally { setLoading(false); }
+    } catch (err: any) {
+      if (seq !== fetchSeqRef.current || !mountedRef.current) return;
+      if (err?.response?.status !== 401) {
+        message.error('数据加载失败');
+      }
+    }
+    finally {
+      if (seq === fetchSeqRef.current && mountedRef.current) setLoading(false);
+    }
   }, [loggedIn, pid, bid]);
 
-  useEffect(() => { if (loggedIn) fetch(); }, [fetch]);
-  useEffect(() => { if (loggedIn) { const t = setInterval(fetch, 30000); return () => clearInterval(t); } }, [fetch, loggedIn]);
+  useEffect(() => { if (loggedIn) fetchData(); }, [fetchData]);
+  useEffect(() => {
+    if (!loggedIn) return;
+    const t = setInterval(fetchData, 5000);
+    return () => clearInterval(t);
+  }, [fetchData, loggedIn]);
+
+  // ---- Auto-select first project when data arrives (separated from fetch to avoid cascade) ----
+  useEffect(() => {
+    if (!pid && data.projects?.length) {
+      setPid(data.projects[0].id);
+    }
+  }, [data.projects, pid]);
 
   // ---- Logout ----
   const logout = () => {
     localStorage.removeItem('screen_token');
     localStorage.removeItem('screen_user');
+    setTab('monitor');
     setLoggedIn(false);
   };
 
@@ -103,12 +139,19 @@ export default function Screen() {
   const openDevice = async (dev: any) => {
     setDevModal({ open: true, dev });
     setPropsLoading(true);
+    const seq = ++openDevSeqRef.current;
     try {
       const r = await api.get('/properties', { params: { device_id: dev.id } });
+      if (seq !== openDevSeqRef.current || !mountedRef.current) return;
       setDevProps(r.data || []);
-    } catch {
-      setDevProps([]);
-    } finally { setPropsLoading(false); }
+    } catch (err: any) {
+      if (seq !== openDevSeqRef.current || !mountedRef.current) return;
+      if (err?.response?.status !== 401) {
+        setDevProps([]);
+      }
+    } finally {
+      if (seq === openDevSeqRef.current && mountedRef.current) setPropsLoading(false);
+    }
   };
 
   // ---- Device control ----
@@ -116,7 +159,10 @@ export default function Screen() {
     try {
       await api.post(`/devices/${devId}/control`, { action, target_value: targetVal || '' });
       message.success('指令已发送');
-    } catch { message.error('控制失败'); }
+    } catch (err: any) {
+      // 401 已由拦截器处理，不重复弹错误提示
+      if (err?.response?.status !== 401) message.error('控制失败');
+    }
   };
 
   // ---- Build topology groups ----
@@ -150,7 +196,9 @@ export default function Screen() {
   }
 
   // ==================== DASHBOARD ====================
-  if (loading) {
+  // 首次加载时显示全屏 Spin；后续轮询不显示（避免卸载子组件导致 state 丢失）
+  const isFirstLoad = loading && !data.projects;
+  if (isFirstLoad) {
     return <div style={{ textAlign: 'center', padding: '40vh 0', background: '#0a1628', minHeight: '100vh' }}><Spin size="large" /></div>;
   }
 
@@ -185,11 +233,12 @@ export default function Screen() {
       </div>
 
       {/* Body */}
-      {tab !== 'monitor' ? (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 'calc(100vh - 112px)', color: '#5a7a9a', fontSize: 16 }}>
-          {TABS.find(t => t.key === tab)?.label} — 开发中
-        </div>
-      ) : (
+      <ErrorBoundary>
+      {tab === 'data' ? (
+        <DataCenter key={`dc-${pid}-${bid}`} pid={pid} bid={bid} devices={data.devices || []} />
+      ) : tab === 'maintain' ? (
+        <MaintenanceCenter key={`mc-${pid}-${bid}`} pid={pid} bid={bid} devices={data.devices || []} />
+      ) : tab === 'monitor' ? (
       <div style={{ display: 'flex', height: 'calc(100vh - 112px)' }}>
         {/* LEFT */}
         <div style={{ width: 220, padding: 12, borderRight: '1px solid #1a3455', overflowY: 'auto' }}>
@@ -296,12 +345,17 @@ export default function Screen() {
               ))
             )}
             <div style={{ ...S, borderTop: '1px solid #1a3455', marginTop: 4, paddingTop: 4 }}>
-              <span>总功率</span><span style={{ color: '#ff4d4f', fontWeight: 700 }}>{(data.meter_power || 0).toFixed(1)} kW</span>
+              <span>总电能</span><span style={{ color: '#ff4d4f', fontWeight: 700 }}>{(data.meter_power || 0).toFixed(1)} kW</span>
             </div>
           </div>
         </div>
       </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 'calc(100vh - 112px)', color: '#5a7a9a', fontSize: 16 }}>
+          {TABS.find(t => t.key === tab)?.label || '未知模块'} — 开发中
+        </div>
       )}
+      </ErrorBoundary>
 
       {/* Device Properties Modal */}
       <Modal
@@ -324,7 +378,7 @@ export default function Screen() {
               ) : p.operation_type === '模式选择' ? (
                 <Select size="small" style={{ width: 140 }} value={p.prop_value || undefined}
                   onChange={v => doControl(devModal.dev?.id, 'mode_change', v)}
-                  options={['制冷','制热','除湿','送风'].map(o=>({value:o,label:o}))} />
+                  options={QUICK_MODES.map(o=>({value:o,label:o}))} />
               ) : p.operation_type === '数值' ? (
                 <NumControl devId={devModal.dev?.id} prop={p} onSet={doControl} />
               ) : (
@@ -383,6 +437,8 @@ function TopoDevice({ d, color, onOpen, size }: { d: any; color: string; onOpen:
   let label: string;
   let labelColor: string;
   let anim: string;
+  let nameColor: string;
+  let boxShadow: string;
 
   if (isFault) {
     bg = '#5c1a1a';
@@ -391,40 +447,51 @@ function TopoDevice({ d, color, onOpen, size }: { d: any; color: string; onOpen:
     label = '✕';
     labelColor = '#ff4d4f';
     anim = 'faultPulse 1.2s ease-in-out infinite';
+    nameColor = '#fff';
+    boxShadow = '0 0 10px rgba(255,77,79,0.3)';
   } else if (isOnline && isOn) {
     bg = color || '#666';
-    border = '2px solid rgba(255,255,255,0.3)';
+    border = '2px solid rgba(255,255,255,0.5)';
     opacity = 1;
     label = '■';
     labelColor = '#fff';
     anim = '';
+    nameColor = '#fff';
+    boxShadow = '0 0 14px rgba(255,255,255,0.2)';
   } else if (isOnline && !isOn) {
-    bg = '#3a4a5a';
-    border = '2px solid #5a7a9a';
-    opacity = 0.8;
-    label = '□';
-    labelColor = '#7a9aba';
-    anim = '';
-  } else if (!isOnline && isOn) {
-    bg = '#5a5a5a';
-    border = '2px dashed #666';
+    bg = '#152233';
+    border = '2px solid #253a50';
     opacity = 0.6;
-    label = '●';
-    labelColor = '#888';
+    label = '□';
+    labelColor = '#4a6a8a';
     anim = '';
-  } else {
-    bg = '#2a2a2a';
+    nameColor = '#4a6a8a';
+    boxShadow = 'none';
+  } else if (!isOnline && isOn) {
+    bg = '#3a3a3a';
     border = '2px dashed #555';
     opacity = 0.5;
-    label = '○';
-    labelColor = '#555';
+    label = '●';
+    labelColor = '#666';
     anim = '';
+    nameColor = '#666';
+    boxShadow = 'none';
+  } else {
+    bg = '#222';
+    border = '2px dashed #444';
+    opacity = 0.4;
+    label = '○';
+    labelColor = '#444';
+    anim = '';
+    nameColor = '#444';
+    boxShadow = 'none';
   }
 
   const boxW = isLarge ? 160 : isSmall ? 44 : 56;
   const boxH = isLarge ? 110 : isSmall ? 44 : 56;
   const fontSize = isLarge ? 14 : isSmall ? 9 : 10;
   const labelFontSize = isLarge ? 18 : isSmall ? 10 : 12;
+  const nameMax = isLarge ? 8 : isSmall ? 4 : 6;
 
   return (
     <div title={d.key_info ? d.name + ': ' + d.key_info : '点击查看属性'} onClick={() => onOpen(d)} style={{
@@ -433,12 +500,12 @@ function TopoDevice({ d, color, onOpen, size }: { d: any; color: string; onOpen:
       background: bg,
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
       color: '#fff', fontSize, fontWeight: 600,
-      border, opacity,
+      border, opacity, boxShadow,
       animation: anim,
       transition: 'transform 0.15s',
     }} onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.05)')} onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}>
       {!isLarge && <div style={{ fontSize: labelFontSize, color: labelColor }}>{label}</div>}
-      <div style={{ lineHeight: 1.2, textAlign: 'center', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: boxW - 8 }}>{d.name.length > 4 ? d.name.slice(0, 4) + '…' : d.name}</div>
+      <div style={{ lineHeight: 1.2, textAlign: 'center', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: boxW - 8, color: nameColor }}>{d.name.length > nameMax ? d.name.slice(0, nameMax) + '…' : d.name}</div>
       {isLarge && d.key_info && (() => {
         const lines = d.key_info.split(/\s*\|\s*/).filter(Boolean);
         return (

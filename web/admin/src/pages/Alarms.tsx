@@ -3,11 +3,7 @@ import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, 
 import { PlusOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
-
-const MODE_OPTIONS = ['制冷','制热','制冷热水','制热热水','开机','关机','营业模式','非营业模式'];
-const OP_NUMERIC = '数值';
-const OP_SWITCH = '开关机';
-const OP_MODE = '模式选择';
+import { MODE_OPTIONS, OP_NUMERIC, OP_SWITCH, OP_MODE } from '../utils/constants';
 
 export default function Alarms() {
   const [rules, setRules] = useState<any[]>([]);
@@ -54,7 +50,7 @@ export default function Alarms() {
     });
   }, []);
 
-  useEffect(() => { if(selProject){setBuildings(allBuildings.filter((b:any)=>Number(b.project_id)===Number(selProject)));if(!restoring.current){setSelBuilding(null);setSelDevice(null);setSelProperty(null);}}else{setBuildings([]);setSelBuilding(null);setSelDevice(null);setSelProperty(null);}}, [selProject]);
+  useEffect(() => { if(selProject){setBuildings(allBuildings.filter((b:any)=>Number(b.project_id)===Number(selProject)));if(!restoring.current){setSelBuilding(null);setSelDevice(null);setSelProperty(null);}}else{setBuildings([]);setSelBuilding(null);setSelDevice(null);setSelProperty(null);}}, [selProject, allBuildings]);
   useEffect(() => { if(selBuilding){api.get('/devices?building_id='+selBuilding).then(r=>setDevices(r.data));if(!restoring.current){setSelDevice(null);setSelProperty(null);}}else{setDevices([]);setSelDevice(null);setSelProperty(null);}}, [selBuilding]);
   useEffect(() => { if(selDevice){api.get('/properties?device_id='+selDevice).then(r=>setProperties(r.data));if(!restoring.current)setSelProperty(null);api.get('/alarm-logs?device_id='+selDevice).then(r=>setLogs(r.data));}else{setProperties([]);setSelProperty(null);setLogs([]);}}, [selDevice]);
   useEffect(() => {
@@ -74,16 +70,24 @@ export default function Alarms() {
     const p: any = { name: v.name, device_id: selDevice, property_id: selProperty, enabled: v.enabled!==false,
       device_type: selPropDetail?.prop_type||'', metric: selPropDetail?.prop_name||'',
       condition: selPropDetail?.operation_type===OP_NUMERIC ? 'range' : 'eq', level: v.level||'warning',
-      notify_users: JSON.stringify(v.notify_users||[]) };
+      notify_users: v.notify_users || [] };
     if(selPropDetail?.operation_type===OP_NUMERIC){ p.min_value=v.min_value; p.max_value=v.max_value; p.threshold=null; }
     else{ p.target_value = v.target_value==='__other__' ? v.custom_target : v.target_value; p.min_value=null; p.max_value=null; p.threshold=null; }
-    if(editing){ await api.put('/alarm-rules/'+editing.id, p); message.success('保存成功'); }
-    else { await api.post('/alarm-rules', p); message.success('保存成功'); }
-    setModalOpen(false); setEditing(null); setCustomMode(false); form.resetFields();
-    if(selDevice) api.get('/alarm-rules?device_id='+selDevice).then(r=>setRules(r.data));
+    try {
+      if(editing){ await api.put('/alarm-rules/'+editing.id, p); }
+      else { await api.post('/alarm-rules', p); }
+      message.success('保存成功');
+      setModalOpen(false); setEditing(null); setCustomMode(false); form.resetFields();
+      if(selDevice) api.get('/alarm-rules?device_id='+selDevice).then(r=>setRules(r.data));
+    } catch { message.error('保存失败'); }
   };
-  const del = async (id: number) => { await api.delete('/alarm-rules/'+id); message.success('已删除');
-    if(selDevice) api.get('/alarm-rules?device_id='+selDevice).then(r=>setRules(r.data)); };
+  const del = async (id: number) => {
+    try {
+      await api.delete('/alarm-rules/'+id);
+      message.success('已删除');
+      if(selDevice) api.get('/alarm-rules?device_id='+selDevice).then(r=>setRules(r.data));
+    } catch { message.error('删除失败'); }
+  };
 
   const rcols = [
     { title: 'ID', dataIndex: 'id', width: 40 },

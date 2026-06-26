@@ -2,6 +2,7 @@
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -38,7 +39,7 @@ func (h *AlarmHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 		TargetValue *string  `json:"target_value"`
 		MinValue    *string  `json:"min_value"`
 		MaxValue    *string  `json:"max_value"`
-		NotifyUsers []byte   `json:"notify_users"`
+		NotifyUsers []int    `json:"notify_users"`
 		Enabled     bool     `json:"enabled"`
 	}
 	var list []rule
@@ -67,7 +68,7 @@ type alarmRuleReq struct {
 	TargetValue *string  `json:"target_value"`
 	MinValue    *string  `json:"min_value"`
 	MaxValue    *string  `json:"max_value"`
-	NotifyUsers []byte   `json:"notify_users"`
+	NotifyUsers []int    `json:"notify_users"`
 	Enabled     *bool    `json:"enabled"`
 }
 
@@ -82,15 +83,19 @@ func (h *AlarmHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var id int
+	enabled := true
+	if rr.Enabled != nil {
+		enabled = *rr.Enabled
+	}
 	err := h.pool.QueryRow(r.Context(),
 		"INSERT INTO alarm_rule (name,device_id,property_id,device_type,metric,condition,threshold,level,target_value,min_value,max_value,notify_users,enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id",
-		rr.Name, rr.DeviceID, rr.PropertyID, rr.DeviceType, rr.Metric, rr.Condition, rr.Threshold, rr.Level, rr.TargetValue, rr.MinValue, rr.MaxValue, rr.NotifyUsers, rr.Enabled).Scan(&id)
+		rr.Name, rr.DeviceID, rr.PropertyID, rr.DeviceType, rr.Metric, rr.Condition, rr.Threshold, rr.Level, rr.TargetValue, rr.MinValue, rr.MaxValue, rr.NotifyUsers, enabled).Scan(&id)
 	if err != nil { serverErr(w, err); return }
 	ok(w, map[string]any{"id": id})
 }
 
 func (h *AlarmHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
-	id := pathID(r.URL.Path)
+	id := pathID(r)
 	var rr alarmRuleReq
 	if err := json.NewDecoder(r.Body).Decode(&rr); err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
@@ -104,7 +109,7 @@ func (h *AlarmHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AlarmHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.pool.Exec(r.Context(), "DELETE FROM alarm_rule WHERE id=$1", pathID(r.URL.Path)); err != nil {
+	if _, err := h.pool.Exec(r.Context(), "DELETE FROM alarm_rule WHERE id=$1", pathID(r)); err != nil {
 		serverErr(w, err)
 		return
 	}
@@ -113,13 +118,69 @@ func (h *AlarmHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 
 func (h *AlarmHandler) ListLogs(w http.ResponseWriter, r *http.Request) {
 	deviceID := queryInt(r, "device_id")
+	buildingID := queryInt(r, "building_id")
+	projectID := queryInt(r, "project_id")
+	dateFrom := r.URL.Query().Get("date_from")
+	dateTo := r.URL.Query().Get("date_to")
+	today := r.URL.Query().Get("today") // "1" = today only
+
 	var rows pgx.Rows
 	var err error
-	if deviceID > 0 {
-		rows, err = h.pool.Query(r.Context(), "SELECT id,device_id,device_name,alarm_type,level,message,value,threshold,COALESCE(created_at::text,''),COALESCE(ack_at::text,'') FROM alarm_log WHERE device_id=$1 ORDER BY created_at DESC LIMIT 100", deviceID)
-	} else {
-		rows, err = h.pool.Query(r.Context(), "SELECT id,device_id,device_name,alarm_type,level,message,value,threshold,COALESCE(created_at::text,''),COALESCE(ack_at::text,'') FROM alarm_log ORDER BY created_at DESC LIMIT 100")
+
+	// Build dynamic query for flexible filtering
+	baseQ := `SELECT al.id, al.device_id, al.device_name, al.alarm_type, al.level,
+		al.message, al.value, al.threshold,
+		COALESCE(al.created_at::text,''), COALESCE(al.ack_at::text,'')
+		FROM alarm_log al`
+	var conditions []string
+	var args []any
+	argIdx := 1
+
+	if buildingID > 0 || projectID > 0 {
+		baseQ += ` JOIN device d ON d.id = al.device_id`
+		if projectID > 0 {
+			baseQ += ` JOIN building b ON b.id = d.building_id`
+		}
 	}
+
+	if deviceID > 0 {
+		conditions = append(conditions, fmt.Sprintf("al.device_id=$%d", argIdx))
+		args = append(args, deviceID)
+		argIdx++
+	}
+	if buildingID > 0 {
+		conditions = append(conditions, fmt.Sprintf("d.building_id=$%d", argIdx))
+		args = append(args, buildingID)
+		argIdx++
+	}
+	if projectID > 0 {
+		conditions = append(conditions, fmt.Sprintf("b.project_id=$%d", argIdx))
+		args = append(args, projectID)
+		argIdx++
+	}
+	if today == "1" {
+		conditions = append(conditions, "al.created_at::date = CURRENT_DATE")
+	}
+	if dateFrom != "" {
+		conditions = append(conditions, fmt.Sprintf("al.created_at >= $%d::timestamp", argIdx))
+		args = append(args, dateFrom)
+		argIdx++
+	}
+	if dateTo != "" {
+		conditions = append(conditions, fmt.Sprintf("al.created_at <= $%d::timestamp", argIdx))
+		args = append(args, dateTo)
+		argIdx++
+	}
+
+	if len(conditions) > 0 {
+		baseQ += " WHERE " + conditions[0]
+		for i := 1; i < len(conditions); i++ {
+			baseQ += " AND " + conditions[i]
+		}
+	}
+	baseQ += " ORDER BY al.created_at DESC LIMIT 200"
+
+	rows, err = h.pool.Query(r.Context(), baseQ, args...)
 	if err != nil { serverErr(w, err); return }
 	defer rows.Close()
 	type alarmLog struct {
@@ -141,6 +202,8 @@ func (h *AlarmHandler) ListLogs(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("ListLogs scan failed", "err", err)
 			continue
 		}
+		if l.CreatedAt != nil && *l.CreatedAt == "" { l.CreatedAt = nil }
+		if l.AckAt != nil && *l.AckAt == "" { l.AckAt = nil }
 		list = append(list, l)
 	}
 	if list == nil { list = []alarmLog{} }
@@ -149,12 +212,13 @@ func (h *AlarmHandler) ListLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AlarmHandler) AckLog(w http.ResponseWriter, r *http.Request) {
-	id := pathID(r.URL.Path)
-	username := "admin"
-	if claims := middleware.GetClaims(r); claims != nil {
-		username = claims.Username
+	id := pathID(r)
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		writeJSON(w, http.StatusUnauthorized, M{"error": "未认证"})
+		return
 	}
-	if _, err := h.pool.Exec(r.Context(), "UPDATE alarm_log SET ack_by=$1, ack_at=NOW() WHERE id=$2", username, id); err != nil {
+	if _, err := h.pool.Exec(r.Context(), "UPDATE alarm_log SET ack_by=$1, ack_at=NOW() WHERE id=$2", claims.Username, id); err != nil {
 		serverErr(w, err)
 		return
 	}

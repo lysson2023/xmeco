@@ -1,8 +1,7 @@
-﻿package handler
+package handler
 
 import (
 	"encoding/csv"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -42,7 +41,7 @@ func (h *LogHandler) Telemetry(w http.ResponseWriter, r *http.Request) {
 	argIdx := 1
 
 	if interval != "" && interval != "raw" {
-		trunc := map[string]string{"minute": "minute", "hour": "hour", "day": "day", "week": "week", "month": "month", "year": "year"}[interval]
+		trunc := truncMap[interval]
 		if trunc == "" {
 			trunc = "day"
 		}
@@ -82,7 +81,10 @@ func (h *LogHandler) Telemetry(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", "attachment; filename=telemetry_"+time.Now().Format("20060102")+".csv")
 		wr := csv.NewWriter(w)
 		if interval != "" && interval != "raw" {
-			_ = wr.Write([]string{"时间", "指标", "平均值", "最大值", "最小值", "记录数"})
+			if err := wr.Write([]string{"时间", "指标", "平均值", "最大值", "最小值", "记录数"}); err != nil {
+				slog.Warn("CSV write header failed", "err", err)
+				return
+			}
 			for rows.Next() {
 				var ts time.Time
 				var m string
@@ -92,10 +94,16 @@ func (h *LogHandler) Telemetry(w http.ResponseWriter, r *http.Request) {
 					slog.Warn("Telemetry export scan failed", "err", err)
 					continue
 				}
-				_ = wr.Write([]string{ts.Format("2006-01-02 15:04:05"), m, ftoa(av), ftoa(mx), ftoa(mn), itos(c)})
+				if err := wr.Write([]string{ts.Format("2006-01-02 15:04:05"), m, ftoa(av), ftoa(mx), ftoa(mn), itos(c)}); err != nil {
+					slog.Warn("CSV write row failed", "err", err)
+					return
+				}
 			}
 		} else {
-			_ = wr.Write([]string{"时间", "指标", "值", "单位"})
+			if err := wr.Write([]string{"时间", "指标", "值", "单位"}); err != nil {
+				slog.Warn("CSV write header failed", "err", err)
+				return
+			}
 			for rows.Next() {
 				var ts time.Time
 				var m, u string
@@ -104,10 +112,16 @@ func (h *LogHandler) Telemetry(w http.ResponseWriter, r *http.Request) {
 					slog.Warn("Telemetry export scan failed", "err", err)
 					continue
 				}
-				_ = wr.Write([]string{ts.Format("2006-01-02 15:04:05"), m, ftoa(v), u})
+				if err := wr.Write([]string{ts.Format("2006-01-02 15:04:05"), m, ftoa(v), u}); err != nil {
+					slog.Warn("CSV write row failed", "err", err)
+					return
+				}
 			}
 		}
 		wr.Flush()
+		if err := wr.Error(); err != nil {
+			slog.Warn("CSV flush failed", "err", err)
+		}
 		return
 	}
 
@@ -179,7 +193,10 @@ func (h *LogHandler) Controls(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", "attachment; filename=controls_"+time.Now().Format("20060102")+".csv")
 		wr := csv.NewWriter(w)
-		_ = wr.Write([]string{"时间", "项目", "楼宇", "设备", "属性", "操作值", "操作人", "备注"})
+		if err := wr.Write([]string{"时间", "项目", "楼宇", "设备", "属性", "操作值", "操作人", "备注"}); err != nil {
+			slog.Warn("CSV write header failed", "err", err)
+			return
+		}
 		for rows.Next() {
 			var ts time.Time
 			var pn, bn, dn, pn2, cv, un, rm string
@@ -187,9 +204,15 @@ func (h *LogHandler) Controls(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("Controls export scan failed", "err", err)
 				continue
 			}
-			_ = wr.Write([]string{ts.Format("2006-01-02 15:04:05"), pn, bn, dn, pn2, cv, un, rm})
+			if err := wr.Write([]string{ts.Format("2006-01-02 15:04:05"), pn, bn, dn, pn2, cv, un, rm}); err != nil {
+				slog.Warn("CSV write row failed", "err", err)
+				return
+			}
 		}
 		wr.Flush()
+		if err := wr.Error(); err != nil {
+			slog.Warn("CSV flush failed", "err", err)
+		}
 		return
 	}
 
@@ -287,5 +310,7 @@ func (h *LogHandler) ExportControls(w http.ResponseWriter, r *http.Request) {
 }
 
 // helpers
-func itos(i int) string    { return fmt.Sprint(i) }
-func ftoa(f float64) string { return fmt.Sprintf("%.2f", f) }
+var truncMap = map[string]string{
+	"minute": "minute", "hour": "hour", "day": "day",
+	"week": "week", "month": "month", "year": "year",
+}

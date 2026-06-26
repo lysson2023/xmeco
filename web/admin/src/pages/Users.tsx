@@ -21,8 +21,11 @@ export default function Users() {
 
   const fetch = async () => {
     setLoading(true);
-    const [u, r, a] = await Promise.all([api.get('/users'), api.get('/roles'), api.get('/agents')]);
-    setData(u.data); setRoles(r.data); setAgents(a.data); setLoading(false);
+    try {
+      const [u, r, a] = await Promise.all([api.get('/users'), api.get('/roles'), api.get('/agents')]);
+      setData(u.data); setRoles(r.data); setAgents(a.data);
+    } catch { message.error('加载失败'); }
+    finally { setLoading(false); }
   };
   useEffect(() => { fetch(); }, []);
 
@@ -33,9 +36,11 @@ export default function Users() {
   });
 
   const save = async (v: any) => {
-    await api.post('/users', v);
-    message.success('创建成功');
-    setModalOpen(false); form.resetFields(); fetch();
+    try {
+      await api.post('/users', v);
+      message.success('创建成功');
+      setModalOpen(false); form.resetFields(); fetch();
+    } catch { message.error('创建失败'); }
   };
 
   const saveEdit = async (v: any) => {
@@ -58,18 +63,25 @@ export default function Users() {
   };
 
   const toggleActive = async (id: number, checked: boolean, r: any) => {
-    await api.put('/users/'+id, { role_id: r.role_id, agent_id: r.agent_id, is_active: checked });
-    message.success(checked ? '已启用' : '已禁用');
-    fetch();
+    try {
+      await api.put('/users/'+id, { role_id: r.role_id, agent_id: r.agent_id, is_active: checked });
+      message.success(checked ? '已启用' : '已禁用');
+      fetch();
+    } catch { message.error('操作失败'); }
   };
 
   const resetPwd = async (v: { old_password: string; new_password: string }) => {
-    await api.post('/users/'+pwdUserId+'/reset-password', v);
-    message.success('密码已重置');
-    setPwdOpen(false); pwdForm.resetFields();
+    try {
+      await api.post('/users/'+pwdUserId+'/reset-password', v);
+      message.success('密码已重置');
+      setPwdOpen(false); pwdForm.resetFields();
+    } catch { message.error('密码重置失败'); }
   };
 
-  const del = async (id: number) => { await api.delete('/users/'+id); message.success('已删除'); fetch(); };
+  const del = async (id: number) => {
+    try { await api.delete('/users/'+id); message.success('已删除'); fetch(); }
+    catch { message.error('删除失败'); }
+  };
 
   const cols = [
     { title: 'ID', dataIndex: 'id', width: 50 },

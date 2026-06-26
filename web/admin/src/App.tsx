@@ -15,7 +15,8 @@ import Users from './pages/Users';
 import Agents from './pages/Agents';
 import Permissions from './pages/Permissions';
 import MultiAgent from './pages/MultiAgent';
-import Dashboard from './pages/Screen';
+import MaintenanceRecords from './pages/MaintenanceRecords';
+import Dashboard from './pages/Dashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -36,6 +37,7 @@ function App() {
               <Route path="alarms" element={<Alarms />} />
               <Route path="logs" element={<Logs />} />
               <Route path="startup-plans" element={<StartupPlans />} />
+              <Route path="maintenance-records" element={<MaintenanceRecords />} />
               <Route path="users" element={<Users />} />
               <Route path="agents" element={<Agents />} />
               <Route path="permissions" element={<Permissions />} />

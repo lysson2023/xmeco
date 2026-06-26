@@ -3,13 +3,7 @@ import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, 
 import { PlusOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
-
-const READ_CODES = ['01', '02', '03', '04'];
-const WRITE_CODES = ['05', '06', '10'];
-const DATA_ORDERS = ['高位在前', '低位在前', '低字在前'];
-const REG_COUNTS = [1, 2, 3, 4];  // Modbus register count, NOT bytes (1 register = 2 bytes)
-const DATA_TYPES = ['无符号16位整数','有符号16位整数','无符号32位整数','有符号32位整数','无符号16位小数','有符号16位小数','无符号32位小数','有符号32位小数','单精度浮点数'];
-const MAGNIFICATIONS = [0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000];
+import { READ_CODES, WRITE_CODES, DATA_ORDERS, REG_COUNTS, DATA_TYPES, MAGNIFICATIONS } from '../utils/constants';
 
 export default function Registers() {
   const [data, setData] = useState<any[]>([]);
@@ -56,7 +50,7 @@ export default function Registers() {
     else { setProperties([]); setSelProperty(null); }
   }, [selDevice]);
   useEffect(() => {
-    if (selProperty) { setLoading(true); api.get('/registers?property_id='+selProperty).then(r=>{setData(r.data);setLoading(false);}); restoring.current = false; }
+    if (selProperty) { setLoading(true); api.get('/registers?property_id='+selProperty).then(r=>{setData(r.data);setLoading(false);}).catch(()=>setLoading(false)); restoring.current = false; }
     else { setData([]); }
   }, [selProperty]);
 
@@ -85,19 +79,25 @@ export default function Registers() {
   }, [searchParams, allBuildings, allDevices, allProperties]);
 
   const save = async (v: any) => {
-    const p: any = { name: v.name, read_addr: v.read_addr, write_addr: v.write_addr, command_name: v.command_name,
-      command_code: v.command_code, status_code: v.status_code, data_order: v.data_order, data_length: v.data_length,
-      data_mask: v.data_mask, data_type: v.data_type, property_id: selProperty,
-      read_code: customReadCode ? v.custom_read_code : v.read_code,
-      write_code: customWriteCode ? v.custom_write_code : v.write_code,
-      magnification: customMag ? parseFloat(v.custom_mag) : v.magnification };
-    if (editing) { await api.put('/registers/'+editing.id, p); message.success('保存成功'); }
-    else { await api.post('/registers', p); message.success('保存成功'); }
-    setModalOpen(false); setEditing(null); setCustomReadCode(false); setCustomWriteCode(false); setCustomMag(false); form.resetFields();
-    if (selProperty) api.get('/registers?property_id='+selProperty).then(r=>setData(r.data));
+    try {
+      const p: any = { name: v.name, read_addr: v.read_addr, write_addr: v.write_addr, command_name: v.command_name,
+        command_code: v.command_code, status_code: v.status_code, data_order: v.data_order, data_length: v.data_length,
+        data_mask: v.data_mask, data_type: v.data_type, property_id: selProperty,
+        read_code: customReadCode ? v.custom_read_code : v.read_code,
+        write_code: customWriteCode ? v.custom_write_code : v.write_code,
+        magnification: customMag ? parseFloat(v.custom_mag) : v.magnification };
+      if (editing) { await api.put('/registers/'+editing.id, p); message.success('保存成功'); }
+      else { await api.post('/registers', p); message.success('保存成功'); }
+      setModalOpen(false); setEditing(null); setCustomReadCode(false); setCustomWriteCode(false); setCustomMag(false); form.resetFields();
+      if (selProperty) api.get('/registers?property_id='+selProperty).then(r=>setData(r.data));
+    } catch { message.error('保存失败'); }
   };
-  const del = async (id: number) => { await api.delete('/registers/'+id); message.success('已删除');
-    if (selProperty) api.get('/registers?property_id='+selProperty).then(r=>setData(r.data)); };
+  const del = async (id: number) => {
+    try {
+      await api.delete('/registers/'+id); message.success('已删除');
+      if (selProperty) api.get('/registers?property_id='+selProperty).then(r=>setData(r.data));
+    } catch { message.error('删除失败'); }
+  };
 
   const cols = [
     { title: 'ID', dataIndex: 'id', width: 40 },

@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
+	"time"
 
 	"xmeco/internal/api/middleware"
 	"xmeco/internal/domain"
@@ -14,6 +16,7 @@ import (
 	"xmeco/internal/gateway/modbus"
 	"xmeco/internal/repository/postgres"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -24,15 +27,14 @@ func queryInt(r *http.Request, key string) int {
 	return v
 }
 
-// pathID returns the last numeric segment (skips suffixes like control, execute, ack).
-func pathID(path string) int {
-	parts := strings.Split(strings.TrimRight(path, "/"), "/")
-	for i := len(parts) - 1; i >= 0; i-- {
-		if id, err := strconv.Atoi(parts[i]); err == nil && id > 0 {
-			return id
-		}
-	}
-	return 0
+// pathID extracts a numeric path parameter "id" from the request using ServeMux routing.
+func pathID(r *http.Request) int {
+	id, _ := strconv.Atoi(r.PathValue("id"))
+	return id
+}
+func boolVal(p *bool, defaultVal bool) bool {
+	if p == nil { return defaultVal }
+	return *p
 }
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -42,7 +44,13 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 func ok(w http.ResponseWriter, v interface{})     { writeJSON(w, http.StatusOK, v) }
 func created(w http.ResponseWriter, v interface{}) { writeJSON(w, http.StatusCreated, v) }
 func notFound(w http.ResponseWriter, msg string)   { writeJSON(w, http.StatusNotFound, M{"error": msg}) }
-func serverErr(w http.ResponseWriter, err error)   { writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()}) }
+func itos(i int) string    { return strconv.Itoa(i) }
+func ftoa(f float64) string { return fmt.Sprintf("%.2f", f) }
+
+func serverErr(w http.ResponseWriter, err error) {
+	slog.Error("internal server error", "err", err)
+	writeJSON(w, http.StatusInternalServerError, M{"error": "内部服务器错误"})
+}
 
 // ===== BUILDING =====
 type BuildingHandler struct{ repo *postgres.BuildingRepo }
@@ -55,8 +63,9 @@ func (h *BuildingHandler) List(w http.ResponseWriter, r *http.Request) {
 	ok(w, list)
 }
 func (h *BuildingHandler) Get(w http.ResponseWriter, r *http.Request) {
-	b, err := h.repo.GetByID(r.Context(), pathID(r.URL.Path))
-	if err != nil { notFound(w, "楼宇不存在"); return }
+	b, err := h.repo.GetByID(r.Context(), pathID(r))
+	if err != nil { serverErr(w, err); return }
+	if b == nil { notFound(w, "楼宇不存在"); return }
 	ok(w, b)
 }
 func (h *BuildingHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -68,12 +77,12 @@ func (h *BuildingHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *BuildingHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var b domain.Building
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
-	b.ID = pathID(r.URL.Path)
+	b.ID = pathID(r)
 	if err := h.repo.Update(r.Context(), &b); err != nil { serverErr(w, err); return }
 	ok(w, b)
 }
 func (h *BuildingHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.Delete(r.Context(), pathID(r.URL.Path)); err != nil { serverErr(w, err); return }
+	if err := h.repo.Delete(r.Context(), pathID(r)); err != nil { serverErr(w, err); return }
 	ok(w, M{"status": "deleted"})
 }
 
@@ -98,35 +107,222 @@ func (h *DeviceHandler) List(w http.ResponseWriter, r *http.Request) {
 	ok(w, list)
 }
 func (h *DeviceHandler) Get(w http.ResponseWriter, r *http.Request) {
-	d, err := h.repo.GetByID(r.Context(), pathID(r.URL.Path))
-	if err != nil { notFound(w, "设备不存在"); return }
+	d, err := h.repo.GetByID(r.Context(), pathID(r))
+	if err != nil { serverErr(w, err); return }
+	if d == nil { notFound(w, "设备不存在"); return }
 	ok(w, d)
 }
 func (h *DeviceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var d domain.Device
 	if err := json.NewDecoder(r.Body).Decode(&d); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
+	if d.DeviceType == "" { writeJSON(w, http.StatusBadRequest, M{"error": "设备类型不能为空"}); return }
 	if err := h.repo.Create(r.Context(), &d); err != nil { serverErr(w, err); return }
 	created(w, d)
 }
 func (h *DeviceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var d domain.Device
 	if err := json.NewDecoder(r.Body).Decode(&d); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
-	d.ID = pathID(r.URL.Path)
+	d.ID = pathID(r)
 	if err := h.repo.Update(r.Context(), &d); err != nil { serverErr(w, err); return }
 	ok(w, d)
 }
 func (h *DeviceHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.Delete(r.Context(), pathID(r.URL.Path)); err != nil { serverErr(w, err); return }
+	if err := h.repo.Delete(r.Context(), pathID(r)); err != nil { serverErr(w, err); return }
 	ok(w, M{"status": "deleted"})
+}
+
+// SensorData returns sensor config + latest telemetry for a temperature/humidity sensor device.
+// GET /api/v1/devices/{id}/sensor-data
+func (h *DeviceHandler) SensorData(w http.ResponseWriter, r *http.Request) {
+	id := pathID(r)
+	if id == 0 {
+		writeJSON(w, http.StatusBadRequest, M{"error": "无效的设备 ID"})
+		return
+	}
+
+	// 获取设备信息（含网关编号）
+	dev, err := h.repo.GetByID(r.Context(), id)
+	if err != nil {
+		notFound(w, "设备不存在")
+		return
+	}
+
+	// 获取传感器配置
+	var channelNo int
+	var sensorNo string
+	var intervalMinutes int
+	err = h.pool.QueryRow(r.Context(),
+		`SELECT COALESCE(channel_no,1), COALESCE(sensor_no,''), COALESCE(interval_minutes,5)
+		 FROM sensor_config WHERE device_id=$1`, id).
+		Scan(&channelNo, &sensorNo, &intervalMinutes)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("SensorData sensor_config query failed", "dev", id, "err", err)
+	}
+
+	// 查询最新遥测数据（温度、湿度、电压、信号强度）
+	type teleRow struct {
+		Metric string
+		Value  float64
+		Unit   string
+		Ts     time.Time
+	}
+	rows, err := h.pool.Query(r.Context(),
+		`SELECT DISTINCT ON (metric) metric, value, COALESCE(unit,''), ts
+		 FROM device_telemetry
+		 WHERE device_id=$1 AND metric IN ('温度','湿度','电压','信号强度','temperature','humidity','voltage','signal')
+		 ORDER BY metric, ts DESC`, id)
+	if err != nil {
+		slog.Warn("SensorData telemetry query failed", "dev", id, "err", err)
+	}
+	teleMap := map[string]teleRow{}
+	var latestTs time.Time
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var t teleRow
+			if rows.Scan(&t.Metric, &t.Value, &t.Unit, &t.Ts) == nil {
+				teleMap[t.Metric] = t
+				if t.Ts.After(latestTs) {
+					latestTs = t.Ts
+				}
+			}
+		}
+	}
+
+	// 统一指标名
+	getVal := func(keys ...string) (float64, string) {
+		for _, k := range keys {
+			if v, ok := teleMap[k]; ok {
+				return v.Value, v.Unit
+			}
+		}
+		return 0, ""
+	}
+	tempVal, _ := getVal("温度", "temperature")
+	humVal, _ := getVal("湿度", "humidity")
+	voltVal, _ := getVal("电压", "voltage")
+	signalVal, _ := getVal("信号强度", "signal")
+
+	gwImei := ""
+	if dev.GatewayImei != nil {
+		gwImei = *dev.GatewayImei
+	}
+
+	updateTime := ""
+	if !latestTs.IsZero() {
+		updateTime = latestTs.Format("2006-01-02 15:04:05")
+	}
+
+	ok(w, M{
+		"device_id":        dev.ID,
+		"device_name":      dev.Name,
+		"device_type":      dev.DeviceType,
+		"gateway_imei":     gwImei,
+		"channel_no":       channelNo,
+		"sensor_no":        sensorNo,
+		"interval_minutes": intervalMinutes,
+		"temperature":      tempVal,
+		"humidity":         humVal,
+		"voltage":          voltVal,
+		"signal_strength":  signalVal,
+		"update_time":      updateTime,
+	})
+}
+
+// SaveSensorConfig saves or updates sensor_config for a device.
+// PUT /api/v1/devices/{id}/sensor-config
+func (h *DeviceHandler) SaveSensorConfig(w http.ResponseWriter, r *http.Request) {
+	id := pathID(r)
+	if id == 0 {
+		writeJSON(w, http.StatusBadRequest, M{"error": "无效的设备 ID"})
+		return
+	}
+	var body struct {
+		ChannelNo       int     `json:"channel_no"`
+		SensorNo        string  `json:"sensor_no"`
+		IntervalMinutes int     `json:"interval_minutes"`
+		Temperature     *float64 `json:"temperature"`
+		Humidity        *float64 `json:"humidity"`
+		Voltage         *float64 `json:"voltage"`
+		SignalStrength  *float64 `json:"signal_strength"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
+		return
+	}
+	if body.IntervalMinutes <= 0 {
+		body.IntervalMinutes = 5
+	}
+	_, err := h.pool.Exec(r.Context(),
+		`INSERT INTO sensor_config (device_id, channel_no, sensor_no, interval_minutes)
+		 VALUES ($1,$2,$3,$4)
+		 ON CONFLICT (device_id) DO UPDATE SET channel_no=$2, sensor_no=$3, interval_minutes=$4`,
+		id, body.ChannelNo, body.SensorNo, body.IntervalMinutes)
+	if err != nil {
+		serverErr(w, err)
+		return
+	}
+	// 将温度/湿度/电压/信号强度写入 device_telemetry
+	now := time.Now()
+	type teleVal struct {
+		metric string
+		value  float64
+		unit   string
+	}
+	var teleVals []teleVal
+	if body.Temperature != nil {
+		teleVals = append(teleVals, teleVal{"温度", *body.Temperature, "℃"})
+	}
+	if body.Humidity != nil {
+		teleVals = append(teleVals, teleVal{"湿度", *body.Humidity, "%"})
+	}
+	if body.Voltage != nil {
+		teleVals = append(teleVals, teleVal{"电压", *body.Voltage, "V"})
+	}
+	if body.SignalStrength != nil {
+		teleVals = append(teleVals, teleVal{"信号强度", *body.SignalStrength, "dbm"})
+	}
+	for _, tv := range teleVals {
+		if _, err := h.pool.Exec(r.Context(),
+			`INSERT INTO device_telemetry (ts, device_id, metric, value, unit) VALUES ($1,$2,$3,$4,$5)`,
+			now, id, tv.metric, tv.value, tv.unit); err != nil {
+			slog.Warn("sensor telemetry insert failed", "dev", id, "metric", tv.metric, "err", err)
+		}
+	}
+	ok(w, M{"status": "saved"})
+}
+
+// dispatchResult captures the outcome of a hardware dispatch attempt.
+type dispatchResult struct {
+	Dispatched bool   `json:"dispatched"`
+	Message    string `json:"dispatch_msg,omitempty"`
+}
+
+// controlActionCN maps an action code to its Chinese display value and target device status.
+func controlActionCN(action string) (controlVal, deviceStatus string) {
+	switch action {
+	case "start", "startup":
+		return "开机", "开机"
+	case "stop", "shutdown":
+		return "关机", "关机"
+	case "restart":
+		return "重启", "开机"
+	case "pause":
+		return "暂停", "暂停"
+	case "resume":
+		return "恢复", "开机"
+	default:
+		return action, ""
+	}
 }
 
 // dispatchHardware sends the control action to the physical device via the gateway.
 // It looks up the register's write_addr/write_code by command_code, builds a Modbus
-// write command, and transmits it through the device's gateway transport. Failures are
-// logged but not returned (best-effort dispatch; the control_record is the audit trail).
-func (h *DeviceHandler) dispatchHardware(ctx context.Context, devID int, action string) {
+// write command, and transmits it through the device's gateway transport.
+// Returns a dispatchResult indicating whether the command reached the hardware.
+func (h *DeviceHandler) dispatchHardware(ctx context.Context, devID int, action string) dispatchResult {
 	if h.gwMgr == nil {
-		return
+		return dispatchResult{Dispatched: false, Message: "gateway manager not available"}
 	}
 	var gwImei, gwType string
 	var nodeAddr, deviceNo int
@@ -136,11 +332,11 @@ func (h *DeviceHandler) dispatchHardware(ctx context.Context, devID int, action 
 		 FROM device d WHERE d.id = $1`, devID).
 		Scan(&gwImei, &gwType, &nodeAddr, &deviceNo)
 	if err != nil || gwImei == "" {
-		return
+		return dispatchResult{Dispatched: false, Message: "device not configured for gateway"}
 	}
 	gw := h.gwMgr.GetGateway(gwImei)
 	if gw == nil || gw.Transport == nil || !gw.Transport.IsConnected() {
-		return
+		return dispatchResult{Dispatched: false, Message: "gateway offline or not connected"}
 	}
 	var writeAddr *int
 	var writeCode *string
@@ -151,12 +347,12 @@ func (h *DeviceHandler) dispatchHardware(ctx context.Context, devID int, action 
 		 ORDER BY r.id LIMIT 1`, devID, action).Scan(&writeAddr, &writeCode)
 	if err != nil || writeAddr == nil || writeCode == nil {
 		slog.Warn("dispatchHardware: no register config", "dev", devID, "action", action)
-		return
+		return dispatchResult{Dispatched: false, Message: "no register write config for action: " + action}
+	}
+	if deviceNo > 255 {
+		return dispatchResult{Dispatched: false, Message: fmt.Sprintf("deviceNo %d exceeds 255", deviceNo)}
 	}
 	dn := deviceNo & 0xFF
-	if dn == 0 && deviceNo != 0 {
-		slog.Warn("dispatchHardware: deviceNo truncated", "deviceNo", deviceNo, "dn", dn)
-	}
 	writeVal := uint16(0xFF00) // ON by default
 	switch action {
 	case "stop", "pause":
@@ -169,13 +365,14 @@ func (h *DeviceHandler) dispatchHardware(ctx context.Context, devID int, action 
 	}
 	if _, err := gw.Transport.SendAndReceive(cmd); err != nil {
 		slog.Warn("gateway dispatch failed", "dev", devID, "gw", gwImei, "err", err)
-	} else {
-		slog.Info("gateway dispatch ok", "dev", devID, "gw", gwImei, "action", action)
+		return dispatchResult{Dispatched: false, Message: "gateway dispatch failed: " + err.Error()}
 	}
+	slog.Info("gateway dispatch ok", "dev", devID, "gw", gwImei, "action", action)
+	return dispatchResult{Dispatched: true, Message: "ok"}
 }
 
 func (h *DeviceHandler) Control(w http.ResponseWriter, r *http.Request) {
-	id := pathID(r.URL.Path)
+	id := pathID(r)
 	if id == 0 {
 		writeJSON(w, http.StatusBadRequest, M{"error": "无效的设备 ID"})
 		return
@@ -191,27 +388,7 @@ func (h *DeviceHandler) Control(w http.ResponseWriter, r *http.Request) {
 	if claims := middleware.GetClaims(r); claims != nil {
 		username = claims.Username
 	}
-	controlVal := body.Action
-	deviceStatus := ""
-	switch body.Action {
-	case "start":
-		controlVal = "开机"
-		deviceStatus = "开机"
-	case "stop":
-		controlVal = "关机"
-		deviceStatus = "关机"
-	case "restart":
-		controlVal = "重启"
-		deviceStatus = "开机"
-	case "pause":
-		controlVal = "暂停"
-		deviceStatus = "暂停"
-	case "resume":
-		controlVal = "恢复"
-		deviceStatus = "开机"
-	default:
-		controlVal = body.Action
-	}
+	controlVal, deviceStatus := controlActionCN(body.Action)
 	var devName, bldName, projName string
 	err := h.pool.QueryRow(r.Context(), `
 		SELECT d.name, b.name, COALESCE(p.name, '')
@@ -232,15 +409,15 @@ func (h *DeviceHandler) Control(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Dispatch to physical device via gateway (best-effort).
-	h.dispatchHardware(r.Context(), id, body.Action)
+	// Dispatch to physical device via gateway.
+	dr := h.dispatchHardware(r.Context(), id, body.Action)
 
 	if deviceStatus != "" {
 		if _, err := h.pool.Exec(r.Context(), `UPDATE device SET device_status=$1 WHERE id=$2`, deviceStatus, id); err != nil {
 			slog.Warn("Control update device_status failed", "dev", id, "err", err)
 		}
 	}
-	ok(w, map[string]any{"status": "ok", "action": body.Action})
+	ok(w, map[string]any{"status": "ok", "action": body.Action, "dispatched": dr.Dispatched, "dispatch_msg": dr.Message})
 }
 
 // ===== PROPERTY =====
@@ -254,8 +431,9 @@ func (h *PropertyHandler) List(w http.ResponseWriter, r *http.Request) {
 	ok(w, list)
 }
 func (h *PropertyHandler) Get(w http.ResponseWriter, r *http.Request) {
-	p, err := h.repo.GetByID(r.Context(), pathID(r.URL.Path))
-	if err != nil { notFound(w, "属性不存在"); return }
+	p, err := h.repo.GetByID(r.Context(), pathID(r))
+	if err != nil { serverErr(w, err); return }
+	if p == nil { notFound(w, "属性不存在"); return }
 	ok(w, p)
 }
 func (h *PropertyHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -267,12 +445,12 @@ func (h *PropertyHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *PropertyHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var p domain.DeviceProperty
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
-	p.ID = pathID(r.URL.Path)
+	p.ID = pathID(r)
 	if err := h.repo.Update(r.Context(), &p); err != nil { serverErr(w, err); return }
 	ok(w, p)
 }
 func (h *PropertyHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.Delete(r.Context(), pathID(r.URL.Path)); err != nil { serverErr(w, err); return }
+	if err := h.repo.Delete(r.Context(), pathID(r)); err != nil { serverErr(w, err); return }
 	ok(w, M{"status": "deleted"})
 }
 
@@ -287,8 +465,9 @@ func (h *RegisterHandler) List(w http.ResponseWriter, r *http.Request) {
 	ok(w, list)
 }
 func (h *RegisterHandler) Get(w http.ResponseWriter, r *http.Request) {
-	reg, err := h.repo.GetByID(r.Context(), pathID(r.URL.Path))
-	if err != nil { notFound(w, "寄存器不存在"); return }
+	reg, err := h.repo.GetByID(r.Context(), pathID(r))
+	if err != nil { serverErr(w, err); return }
+	if reg == nil { notFound(w, "寄存器不存在"); return }
 	ok(w, reg)
 }
 func (h *RegisterHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -300,11 +479,11 @@ func (h *RegisterHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *RegisterHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var reg domain.Register
 	if err := json.NewDecoder(r.Body).Decode(&reg); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
-	reg.ID = pathID(r.URL.Path)
+	reg.ID = pathID(r)
 	if err := h.repo.Update(r.Context(), &reg); err != nil { serverErr(w, err); return }
 	ok(w, reg)
 }
 func (h *RegisterHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.Delete(r.Context(), pathID(r.URL.Path)); err != nil { serverErr(w, err); return }
+	if err := h.repo.Delete(r.Context(), pathID(r)); err != nil { serverErr(w, err); return }
 	ok(w, M{"status": "deleted"})
 }

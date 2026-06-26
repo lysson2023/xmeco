@@ -1,12 +1,14 @@
-﻿package auth
+package auth
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -14,6 +16,7 @@ import (
 var (
 	ErrInvalidCredentials = errors.New("用户名或密码错误")
 	ErrUserInactive       = errors.New("用户已被禁用")
+	ErrInternal           = errors.New("服务内部错误")
 )
 
 type Service struct {
@@ -43,6 +46,9 @@ func New(pool *pgxpool.Pool, secret string) *Service {
 	return &Service{pool: pool, jwtSecret: []byte(secret)}
 }
 
+// Pool 暴露连接池供 handler 做辅助查询（如 /auth/me 查 role name）
+func (s *Service) Pool() *pgxpool.Pool { return s.pool }
+
 // Login 验证用户名密码，返回 JWT token
 func (s *Service) Login(ctx context.Context, username, password string) (string, *User, error) {
 	var user User
@@ -54,7 +60,11 @@ func (s *Service) Login(ctx context.Context, username, password string) (string,
 		 WHERE u.username = $1`, username,
 	).Scan(&user.ID, &user.Username, &passwordHash, &user.RoleID, &user.RoleCode, &user.RoleLevel, &user.AgentID, &user.DefaultProjectID, &isActive)
 	if err != nil {
-		return "", nil, ErrInvalidCredentials
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil, ErrInvalidCredentials
+		}
+		slog.Error("Login DB query failed", "username", username, "err", err)
+		return "", nil, fmt.Errorf("%w: %v", ErrInternal, err)
 	}
 	if !isActive {
 		return "", nil, ErrUserInactive
@@ -111,6 +121,9 @@ func (s *Service) Login(ctx context.Context, username, password string) (string,
 // ValidateToken 验证 JWT，返回 Claims
 func (s *Service) ValidateToken(tokenStr string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
 		return s.jwtSecret, nil
 	})
 	if err != nil {

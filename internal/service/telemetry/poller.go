@@ -23,7 +23,6 @@ import (
 type Poller struct {
 	pool     *pgxpool.Pool
 	alarm    *alarm.Engine
-	devRepo  *postgres.DeviceRepo
 	regRepo  *postgres.RegisterRepo
 	propRepo *postgres.PropertyRepo
 }
@@ -32,7 +31,6 @@ func NewPoller(pool *pgxpool.Pool) *Poller {
 	return &Poller{
 		pool:     pool,
 		alarm:    alarm.New(pool),
-		devRepo:  postgres.NewDeviceRepo(pool),
 		regRepo:  postgres.NewRegisterRepo(pool),
 		propRepo: postgres.NewPropertyRepo(pool),
 	}

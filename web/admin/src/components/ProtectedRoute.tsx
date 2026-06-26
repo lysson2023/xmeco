@@ -1,16 +1,17 @@
-import { Navigate } from 'react-router-dom';
-
-function isTokenExpired(token: string): boolean {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    return payload.exp * 1000 < Date.now();
-  } catch {
-    return true;
-  }
-}
+import { useEffect } from 'react';
+import { Navigate, useNavigate } from 'react-router-dom';
+import { isTokenExpired } from '../utils/auth';
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const navigate = useNavigate();
   const token = localStorage.getItem('token');
+
+  useEffect(() => {
+    const handler = () => navigate('/login', { replace: true });
+    window.addEventListener('auth-expired', handler);
+    return () => window.removeEventListener('auth-expired', handler);
+  }, [navigate]);
+
   if (!token || isTokenExpired(token)) {
     localStorage.removeItem('token');
     localStorage.removeItem('user');

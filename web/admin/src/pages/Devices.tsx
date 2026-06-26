@@ -3,8 +3,7 @@ import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, 
 import { PlusOutlined } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../api/client';
-
-const DEVICE_TYPES = ['主机', '冷冻泵', '冷却泵', '冷却塔', '阀门', '二次泵', '电表', '温湿度传感器', '其它'];
+import { DEVICE_TYPES } from '../utils/constants';
 
 export default function Devices() {
   const [data, setData] = useState<any[]>([]);
@@ -62,7 +61,7 @@ export default function Devices() {
   useEffect(() => {
     if (selectedBuilding) {
       setLoading(true);
-      api.get('/devices?building_id='+selectedBuilding).then(r => { setData(r.data); setLoading(false); });
+      api.get('/devices?building_id='+selectedBuilding).then(r => { setData(r.data); setLoading(false); }).catch(() => setLoading(false));
     } else {
       setData([]);
     }
@@ -78,17 +77,21 @@ export default function Devices() {
   };
 
   const save = async (v: any) => {
-    const payload = { ...v, building_id: selectedBuilding };
-    if (payload.device_type === '其它') payload.device_type = payload.custom_device_type;
-    delete payload.custom_device_type;
-    if (editing) { await api.put('/devices/'+editing.id, payload); message.success('保存成功'); }
-    else { await api.post('/devices', payload); message.success('保存成功'); }
-    setModalOpen(false); setEditing(null); setCustomType(false); form.resetFields();
-    if (selectedBuilding) api.get('/devices?building_id='+selectedBuilding).then(r => setData(r.data));
+    try {
+      const payload = { ...v, building_id: selectedBuilding };
+      if (payload.device_type === '其它') payload.device_type = payload.custom_device_type;
+      delete payload.custom_device_type;
+      if (editing) { await api.put('/devices/'+editing.id, payload); message.success('保存成功'); }
+      else { await api.post('/devices', payload); message.success('保存成功'); }
+      setModalOpen(false); setEditing(null); setCustomType(false); form.resetFields();
+      if (selectedBuilding) api.get('/devices?building_id='+selectedBuilding).then(r => setData(r.data));
+    } catch { message.error('保存失败'); }
   };
   const del = async (id: number) => {
-    await api.delete('/devices/'+id); message.success('已删除');
-    if (selectedBuilding) api.get('/devices?building_id='+selectedBuilding).then(r => setData(r.data));
+    try {
+      await api.delete('/devices/'+id); message.success('已删除');
+      if (selectedBuilding) api.get('/devices?building_id='+selectedBuilding).then(r => setData(r.data));
+    } catch { message.error('删除失败'); }
   };
 
   const cols = [

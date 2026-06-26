@@ -3,8 +3,7 @@ import { Table, Button, Modal, Form, Input, Space, message, Popconfirm } from 'a
 import { PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
-
-interface Agent { id: number; name: string; created_at: string }
+import type { Agent } from '../types';
 
 export default function Agents() {
   const [data, setData] = useState<Agent[]>([]);
@@ -18,31 +17,37 @@ export default function Agents() {
 
   const fetch = async () => {
     setLoading(true);
-    const [a, u, p] = await Promise.all([
-      api.get('/agents'),
-      api.get('/users'),
-      api.get('/projects'),
-    ]);
-    setData(a.data); setAllUsers(u.data); setAllProjects(p.data);
-    setLoading(false);
+    try {
+      const [a, u, p] = await Promise.all([
+        api.get('/agents'),
+        api.get('/users'),
+        api.get('/projects'),
+      ]);
+      setData(a.data); setAllUsers(u.data); setAllProjects(p.data);
+    } catch { message.error('加载失败'); }
+    finally { setLoading(false); }
   };
   useEffect(() => { fetch(); }, []);
 
   const save = async (v: any) => {
-    if (editing) {
-      await api.put('/agents/'+editing.id, v);
-      message.success('更新成功');
-    } else {
-      await api.post('/agents', v);
-      message.success('创建成功');
-    }
-    setModalOpen(false); setEditing(null); form.resetFields(); fetch();
+    try {
+      if (editing) {
+        await api.put('/agents/'+editing.id, v);
+        message.success('更新成功');
+      } else {
+        await api.post('/agents', v);
+        message.success('创建成功');
+      }
+      setModalOpen(false); setEditing(null); form.resetFields(); fetch();
+    } catch { message.error('保存失败'); }
   };
 
   const del = async (id: number) => {
-    await api.delete('/agents/'+id);
-    message.success('已删除');
-    fetch();
+    try {
+      await api.delete('/agents/'+id);
+      message.success('已删除');
+      fetch();
+    } catch { message.error('删除失败'); }
   };
 
   const userCount = (agentId: number) => allUsers.filter((u: any) => Number(u.agent_id) === agentId).length;

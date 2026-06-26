@@ -18,7 +18,11 @@ func TestLoadDefaults(t *testing.T) {
 	os.Setenv("XMECO_JWT_SECRET", "test-secret")
 	defer os.Unsetenv("XMECO_JWT_SECRET")
 
-	cfg := Load()
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
 
 	if cfg.DBHost != "localhost" {
 		t.Errorf("DBHost = %q, want localhost", cfg.DBHost)
@@ -60,7 +64,11 @@ func TestLoadCustom(t *testing.T) {
 		}
 	}()
 
-	cfg := Load()
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
 
 	if cfg.DBHost != "db.example.com" {
 		t.Errorf("DBHost = %q, want db.example.com", cfg.DBHost)
@@ -79,7 +87,7 @@ func TestLoadCustom(t *testing.T) {
 func TestDSN(t *testing.T) {
 	cfg := &Config{
 		DBHost: "localhost", DBPort: "5432", DBUser: "postgres",
-		DBPassword: "secret", DBName: "xmeco",
+		DBPassword: "secret", DBName: "xmeco", DBSSLMode: "disable",
 	}
 	dsn := cfg.DSN()
 	expected := "postgres://postgres:secret@localhost:5432/xmeco?sslmode=disable"
@@ -132,7 +140,11 @@ func TestGetEnvIntZeroRetention(t *testing.T) {
 		os.Unsetenv("XMECO_JWT_SECRET")
 	}()
 
-	cfg := Load()
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
 	if cfg.RetentionDays != 0 {
 		t.Errorf("RetentionDays = %d, want 0 (disabled)", cfg.RetentionDays)
 	}

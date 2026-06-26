@@ -74,20 +74,31 @@ func StartExecution(ctx context.Context, pool *pgxpool.Pool, planID int, planNam
 func (e *Execution) LogStep(ctx context.Context, step Step, result, responseValue, errMsg string, durationMs int) {
 	e.mu.Lock()
 	if result == "success" || result == "skip" { e.DoneSteps++ } else if result == "error" { e.Status = "error" }
+	doneSteps := e.DoneSteps
+	status := e.Status
 	e.mu.Unlock()
 	_, err := e.pool.Exec(ctx,
 		`INSERT INTO startup_step_log (execution_id,step_order,device_name,action,target_value,result,response_value,duration_ms,error_message) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 		e.ID, step.SortOrder, step.DeviceName, step.Action, step.TargetValue, result, responseValue, durationMs, errMsg)
 	if err != nil { slog.Warn("step log failed", "err", err) }
+	// 同步更新 DB 的 done_steps 和 status，让前端能实时看到执行进度
+	if _, err := e.pool.Exec(ctx, `UPDATE startup_execution SET done_steps=$1, status=$2 WHERE id=$3`,
+		doneSteps, status, e.ID); err != nil {
+		slog.Warn("execution progress update failed", "exec", e.ID, "err", err)
+	}
 }
 
 func (e *Execution) Finish(ctx context.Context) {
+	e.mu.Lock()
 	if e.Status == "running" { e.Status = "completed" }
+	status := e.Status
+	doneSteps := e.DoneSteps
+	e.mu.Unlock()
 	if _, err := e.pool.Exec(ctx, `UPDATE startup_execution SET status=$1,done_steps=$2,finished_at=$3 WHERE id=$4`,
-		e.Status, e.DoneSteps, time.Now(), e.ID); err != nil {
+		status, doneSteps, time.Now(), e.ID); err != nil {
 		slog.Warn("execution finish update failed", "exec", e.ID, "err", err)
 	}
-	slog.Info("execution finished", "plan", e.PlanName, "status", e.Status)
+	slog.Info("execution finished", "plan", e.PlanName, "status", status)
 }
 
 // isStopped checks if the execution has been externally marked as stopped in the DB.
@@ -143,13 +154,14 @@ func (e *Execution) Run(ctx context.Context, steps []Step, execFn func(ctx conte
 			return
 		}
 		if step.WaitSeconds > 0 {
+			timer := time.NewTimer(time.Duration(step.WaitSeconds) * time.Second)
 			select {
-			case <-time.After(time.Duration(step.WaitSeconds) * time.Second):
+			case <-timer.C:
 			case <-ctx.Done():
+				timer.Stop()
 				setStopped()
 				return
 			}
 		}
 	}
 }
-

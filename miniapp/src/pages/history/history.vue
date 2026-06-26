@@ -37,6 +37,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { api } from '../../api/client';
+import { AuthError } from '../../api/client';
 
 const allDevices = ref<any[]>([]);
 const metrics = ref<any[]>([]);
@@ -73,20 +74,20 @@ function fmtVal(v: number) { return Number(v).toFixed(1); }
 function setQuick(i: number) {
   quick.value = i; const now = new Date();
   if (i===0) { startDate.value = fmtDate(now); endDate.value = fmtDate(now); }
-  else if (i===1) { const wk = new Date(now); wk.setDate(now.getDate()-7); startDate.value = fmtDate(wk); endDate.value = fmtDate(now); }
+  else if (i===1) { const day = now.getDay() || 7; const monday = new Date(now); monday.setDate(now.getDate()-day+1); startDate.value = fmtDate(monday); endDate.value = fmtDate(now); }
   else if (i===2) { startDate.value = fmtDate(new Date(now.getFullYear(),now.getMonth(),1)); endDate.value = fmtDate(now); }
   load();
 }
 
 function onDevChange(e: any) { const i = e.detail.value as number; selDev.value = allDevices.value[i]?.id; selDevName.value = devNames.value[i]; loadMetrics(); }
-function onMetricChange(e: any) { selMetric.value = metricNames.value[e.detail.value]; if(selMetric.value==='全部指标')selMetric.value=''; load(); }
+function onMetricChange(e: any) { const idx = e.detail.value as number; selMetric.value = idx===0 ? '' : metricNames.value[idx]; load(); }
 function onIntervalChange(e: any) { selInterval.value = ['raw','minute','hour','day','week','month','year'][e.detail.value]; load(); }
 function onStart(e: any) { startDate.value = e.detail.value; quick.value = 3; load(); }
 function onEnd(e: any) { endDate.value = e.detail.value; quick.value = 3; load(); }
 
 async function loadMetrics() {
   if (!selDev.value) return;
-  try { const r = await api.get('/properties?device_id='+selDev.value); metrics.value = r.data as any[]; metricNames.value = ['全部指标',...((r.data as any[]).map((p:any)=>p.prop_name))]; } catch {}
+  try { const r = await api.get('/properties?device_id='+selDev.value); metrics.value = (r.data as any) || []; metricNames.value = ['全部指标',...((r.data as any[]).map((p:any)=>p.prop_name))]; } catch (e) { if (!(e instanceof AuthError)) {} }
   load();
 }
 

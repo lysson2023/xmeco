@@ -16,15 +16,26 @@ func NewAdminRepo(pool DBTX) *AdminRepo {
 	return &AdminRepo{pool: pool}
 }
 
-// SystemInfo returns basic system information (DB version).
+// SystemInfo returns basic system information (DB version, status, server time).
 func (r *AdminRepo) SystemInfo(ctx context.Context) (map[string]any, error) {
 	var version string
 	if err := r.pool.QueryRow(ctx, `SELECT version()`).Scan(&version); err != nil {
 		version = "unknown"
 	}
+	var migrations int
+	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&migrations); err != nil {
+		migrations = 0
+	}
+	var serverTime string
+	if err := r.pool.QueryRow(ctx, `SELECT to_char(NOW(),'YYYY-MM-DD HH24:MI:SS')`).Scan(&serverTime); err != nil {
+		serverTime = "unknown"
+	}
 	return map[string]any{
 		"service":    "XMECO",
+		"status":     "running",
+		"time":       serverTime,
 		"db_version": version,
+		"migrations": migrations,
 	}, nil
 }
 
@@ -243,6 +254,7 @@ func (r *AdminRepo) DBStats(ctx context.Context) (map[string]any, error) {
 		"db_size_mb":    math.Round(mb*100) / 100,
 		"connections":   connCount,
 		"table_count":   tableCount,
+		"tables":        tableCount,
 		"row_count":     rowCount,
 	}, nil
 }

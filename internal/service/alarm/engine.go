@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -44,9 +43,9 @@ func (e *Engine) Evaluate(ctx context.Context, deviceID int, deviceName, deviceT
 		// between SELECT and INSERT.
 		tag, err := e.pool.Exec(ctx,
 			`INSERT INTO alarm_log (device_id,device_name,alarm_type,level,message,value,threshold,created_at)
-			 VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+			 VALUES($1,$2,$3,$4,$5,$6,$7,NOW())
 			 ON CONFLICT (device_id, alarm_type) WHERE ack_at IS NULL DO NOTHING`,
-			deviceID, deviceName, metric, level, msg, fmt.Sprintf("%.1f", value), thr, time.Now())
+			deviceID, deviceName, metric, level, msg, fmt.Sprintf("%.1f", value), thr)
 		if err != nil {
 			slog.Error("alarm insert failed", "dev", deviceName, "err", err)
 		} else if tag.RowsAffected() > 0 {

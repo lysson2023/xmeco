@@ -52,7 +52,7 @@ export default function StartupPlans() {
     else{setBuildings([]);setSelBuilding(null);setPlans([]);}
   }, [selProject]);
   useEffect(() => {
-    if(selBuilding){setLoading(true);api.get('/startup-plans?building_id='+selBuilding).then(r=>{setPlans(r.data);setLoading(false); restoring.current = false;});api.get('/devices?building_id='+selBuilding).then(r=>setDevices(r.data));}
+    if(selBuilding){setLoading(true);api.get('/startup-plans?building_id='+selBuilding).then(r=>{setPlans(r.data);setLoading(false); restoring.current = false;}).catch(()=>setLoading(false));api.get('/devices?building_id='+selBuilding).then(r=>setDevices(r.data));}
     else{setPlans([]);setDevices([]);}
   }, [selBuilding]);
   useEffect(() => {
@@ -86,37 +86,53 @@ export default function StartupPlans() {
   };
 
   const save = async () => {
-    const v = form.getFieldsValue();
-    if(!v.name||!selBuilding||steps.length===0){message.warning('请填写名称并添加至少一个步骤');return;}
-    const p: any = { name: v.name, building_id: selBuilding, plan_type: planType,
-      steps: steps.map((s,i)=>({device_id:s.device_id,sort_order:i+1,wait_seconds:s.wait_seconds,retry_count:s.retry_count||1,action:planType})) };
-    if(editing){ await api.put('/startup-plans/'+editing.id, p); message.success('更新成功'); }
-    else { await api.post('/startup-plans', p); message.success('创建成功'); }
-    setModalOpen(false); setEditing(null); setSteps([]); form.resetFields();
-    if(selBuilding) api.get('/startup-plans?building_id='+selBuilding).then(r=>setPlans(r.data));
+    try {
+      const v = form.getFieldsValue();
+      if(!v.name||!selBuilding||steps.length===0){message.warning('请填写名称并添加至少一个步骤');return;}
+      const p: any = { name: v.name, building_id: selBuilding, plan_type: planType,
+        steps: steps.map((s,i)=>({device_id:s.device_id,sort_order:i+1,wait_seconds:s.wait_seconds,retry_count:s.retry_count||1,action:planType})) };
+      if(editing){ await api.put('/startup-plans/'+editing.id, p); message.success('更新成功'); }
+      else { await api.post('/startup-plans', p); message.success('创建成功'); }
+      setModalOpen(false); setEditing(null); setSteps([]); form.resetFields();
+      if(selBuilding) api.get('/startup-plans?building_id='+selBuilding).then(r=>setPlans(r.data));
+    } catch { message.error('保存失败'); }
   };
-  const del = async (id: number) => { await api.delete('/startup-plans/'+id); message.success('已删除');
-    if(selBuilding) api.get('/startup-plans?building_id='+selBuilding).then(r=>setPlans(r.data)); };
-  const execute = async (id: number) => { await api.post('/startup-plans/'+id+'/execute'); message.success('已执行'); };
+  const del = async (id: number) => {
+    try {
+      await api.delete('/startup-plans/'+id); message.success('已删除');
+      if(selBuilding) api.get('/startup-plans?building_id='+selBuilding).then(r=>setPlans(r.data));
+    } catch { message.error('删除失败'); }
+  };
+  const execute = async (id: number) => {
+    try {
+      await api.post('/startup-plans/'+id+'/execute'); message.success('已执行');
+    } catch { message.error('执行失败'); }
+  };
 
   // ---- Scheduled Task helpers ----
   const taskSave = async () => {
-    const v = taskForm.getFieldsValue();
-    if(!v.name||!taskSelBuilding||!v.device_id||!v.schedule_time){message.warning('请填写必填项');return;}
-    const timeStr = v.schedule_time.format('HH:mm:ss');
-    const payload: any = {
-      name: v.name, building_id: taskSelBuilding, device_id: v.device_id,
-      action_type: v.action_type||'startup', target_value: v.target_value||null,
-      schedule_type: v.schedule_type||'once', schedule_time: timeStr,
-      days_of_week: v.days_of_week||null, enabled: v.enabled!==false,
-    };
-    if(taskEditing){ await api.put('/scheduled-tasks/'+taskEditing.id, payload); message.success('已更新'); }
-    else { await api.post('/scheduled-tasks', payload); message.success('已创建'); }
-    setTaskModalOpen(false); setTaskEditing(null); taskForm.resetFields();
-    if(taskSelBuilding) api.get('/scheduled-tasks?building_id='+taskSelBuilding).then(r=>setTasks(r.data));
+    try {
+      const v = taskForm.getFieldsValue();
+      if(!v.name||!taskSelBuilding||!v.device_id||!v.schedule_time){message.warning('请填写必填项');return;}
+      const timeStr = v.schedule_time.format('HH:mm:ss');
+      const payload: any = {
+        name: v.name, building_id: taskSelBuilding, device_id: v.device_id,
+        action_type: v.action_type||'startup', target_value: v.target_value||null,
+        schedule_type: v.schedule_type||'once', schedule_time: timeStr,
+        days_of_week: v.days_of_week||null, enabled: v.enabled!==false,
+      };
+      if(taskEditing){ await api.put('/scheduled-tasks/'+taskEditing.id, payload); message.success('已更新'); }
+      else { await api.post('/scheduled-tasks', payload); message.success('已创建'); }
+      setTaskModalOpen(false); setTaskEditing(null); taskForm.resetFields();
+      if(taskSelBuilding) api.get('/scheduled-tasks?building_id='+taskSelBuilding).then(r=>setTasks(r.data));
+    } catch { message.error('保存失败'); }
   };
-  const taskDel = async (id: number) => { await api.delete('/scheduled-tasks/'+id); message.success('已删除');
-    if(taskSelBuilding) api.get('/scheduled-tasks?building_id='+taskSelBuilding).then(r=>setTasks(r.data)); };
+  const taskDel = async (id: number) => {
+    try {
+      await api.delete('/scheduled-tasks/'+id); message.success('已删除');
+      if(taskSelBuilding) api.get('/scheduled-tasks?building_id='+taskSelBuilding).then(r=>setTasks(r.data));
+    } catch { message.error('删除失败'); }
+  };
 
   const actionLabel = (a: string) => { const m: any = {startup:'开机',shutdown:'关机',set_value:'设值',mode_change:'切换模式'}; return m[a]||a; };
   const actionColor = (a: string) => { const m: any = {startup:'green',shutdown:'red',set_value:'blue',mode_change:'orange'}; return m[a]||'default'; };
@@ -131,7 +147,7 @@ export default function StartupPlans() {
     { title: '步骤', dataIndex: 'steps', width: 300, render: (v:any)=>{
       if(!v||!Array.isArray(v)) return '-';
       try{const s=typeof v==='string'?JSON.parse(v):v; return s.map((x:any,i:number)=><span key={i}>{x.device_name||x.device_id}{i<s.length-1?' → ':''}</span>)}
-      catch(e){return '-'}
+      catch{return '-'}
     }},
     { title: '操作', width: 150, render: (_:any,r:any)=>(<Space size="small">
       <a onClick={()=>{setEditing(r);form.setFieldsValue(r);setPlanType(r.plan_type||'startup');
@@ -151,8 +167,10 @@ export default function StartupPlans() {
     { title: '执行时间', dataIndex: 'schedule_time', width: 90 },
     { title: '启用', dataIndex: 'enabled', width: 60, render: (v:boolean, r:any) =>
       <Switch size="small" checked={v} onChange={async (c)=>{
-        await api.put('/scheduled-tasks/'+r.id, {...r, enabled: c, schedule_time: r.schedule_time});
-        setTasks(tasks.map(t=>t.id===r.id?{...t,enabled:c}:t));
+        try {
+          await api.put('/scheduled-tasks/'+r.id, { enabled: c });
+          setTasks(tasks.map(t=>t.id===r.id?{...t,enabled:c}:t));
+        } catch { message.error('操作失败'); }
       }} />
     },
     { title: '上次结果', dataIndex: 'last_result', width: 80, render: (v:any)=>
@@ -193,7 +211,7 @@ export default function StartupPlans() {
           </div>
           <div style={{maxHeight:300,overflowY:'auto',border:'1px solid #f0f0f0',borderRadius:8,padding:8,marginBottom:16}}>
             {steps.length===0 && <div style={{color:'#999',textAlign:'center',padding:20}}>暂无步骤，点击"添加步骤"</div>}
-            {steps.map((s,idx)=>(<Row key={idx} gutter={8} style={{marginBottom:8,alignItems:'center',background:'#fafafa',padding:'6px 8px',borderRadius:6}}>
+            {steps.map((s,idx)=>(<Row key={s.device_id+'-'+idx} gutter={8} style={{marginBottom:8,alignItems:'center',background:'#fafafa',padding:'6px 8px',borderRadius:6}}>
               <Col flex="30px"><span style={{color:'#006875',fontWeight:600}}>{idx+1}</span></Col>
               <Col flex="auto"><Select style={{width:'100%'}} value={s.device_id} onChange={v=>{const ns=[...steps];ns[idx].device_id=v;ns[idx].device_name=devices.find(d=>d.id===v)?.name||'';setSteps(ns);}} options={devices.map(d=>({value:d.id,label:d.name}))}/></Col>
               <Col flex="90px"><InputNumber style={{width:'100%'}} addonAfter="秒" min={1} max={300} value={s.wait_seconds} onChange={v=>{const ns=[...steps];ns[idx].wait_seconds=v||20;setSteps(ns);}}/></Col>

@@ -2,9 +2,7 @@
 import { Card, Checkbox, Button, message, Space } from 'antd';
 import { SaveOutlined } from '@ant-design/icons';
 import api from '../api/client';
-
-interface Role { id: number; code: string; name: string; level: number; is_system: boolean }
-interface Permission { id: number; code: string; name: string; perm_group: string }
+import type { Role, Permission } from '../types';
 
 const groupNames: Record<string, string> = {
   project: '项目管理', building: '建筑管理', device: '设备管理',

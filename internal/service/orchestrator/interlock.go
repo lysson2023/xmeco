@@ -21,7 +21,9 @@ func (il *Interlock) Check(ctx context.Context, targetDeviceID int, action strin
 	if err != nil { return err }
 	defer rows.Close()
 
+	hasRules := false
 	for rows.Next() {
+		hasRules = true
 		var checkDevID int; var propName, expected, msg, devName string
 		if err := rows.Scan(&checkDevID, &propName, &expected, &msg, &devName); err != nil {
 			slog.Warn("interlock check scan failed", "target_dev", targetDeviceID, "action", action, "err", err)
@@ -38,6 +40,9 @@ func (il *Interlock) Check(ctx context.Context, targetDeviceID int, action strin
 			if msg == "" { msg = devName + " " + propName + " 应为 " + expected + "，实际为 " + actual }
 			return fmt.Errorf("%s", msg)
 		}
+	}
+	if !hasRules {
+		slog.Debug("interlock: no rules configured, allowing", "target_dev", targetDeviceID, "action", action)
 	}
 	return rows.Err()
 }

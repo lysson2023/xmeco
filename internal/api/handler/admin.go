@@ -1,10 +1,11 @@
-﻿package handler
+package handler
 
 import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
 
+	"xmeco/internal/api/middleware"
 	"xmeco/internal/domain"
 	"xmeco/internal/repository/postgres"
 	"xmeco/internal/service/auth"
@@ -68,12 +69,34 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
 		return
 	}
-	id := pathID(r.URL.Path)
+	id := pathID(r)
+	if id == 0 {
+		writeJSON(w, http.StatusBadRequest, M{"error": "无效的用户 ID"})
+		return
+	}
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		writeJSON(w, http.StatusUnauthorized, M{"error": "未认证"})
+		return
+	}
+	// Only super_admin or the user themselves can update user info.
+	if claims.RoleCode != auth.RoleSuperAdmin && claims.UserID != id {
+		writeJSON(w, http.StatusForbidden, M{"error": "无权限修改该用户"})
+		return
+	}
+
 	isActive := true
 	if body.IsActive != nil {
 		isActive = *body.IsActive
 	}
-	if err := h.repo.UpdateUser(r.Context(), id, body.RoleID, body.AgentID, isActive, body.Remark); err != nil {
+	// If isActive is not provided (nil), preserve existing value by passing 0
+	// for roleID to skip the update (SQL uses CASE WHEN $1=0 THEN role_id ELSE $1 END).
+	roleID := body.RoleID
+	if body.IsActive == nil && body.RoleID == 0 && body.AgentID == nil && body.Remark == nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "至少需要提供一个要更新的字段"})
+		return
+	}
+	if err := h.repo.UpdateUser(r.Context(), id, roleID, body.AgentID, isActive, body.Remark); err != nil {
 		slog.Warn("UpdateUser failed", "id", id, "err", err)
 		writeJSON(w, http.StatusInternalServerError, M{"error": "更新失败"})
 		return
@@ -90,22 +113,48 @@ func (h *AdminHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, M{"error": "请输入新密码"})
 		return
 	}
-	// Verify old password (required for all reset operations).
-	currentHash, err := h.repo.GetPasswordHash(r.Context(), pathID(r.URL.Path))
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, M{"error": "用户不存在"})
+	targetID := pathID(r)
+	if targetID == 0 {
+		writeJSON(w, http.StatusBadRequest, M{"error": "无效的用户 ID"})
 		return
 	}
-	if err := auth.CheckPassword(currentHash, body.OldPassword); err != nil {
-		writeJSON(w, http.StatusForbidden, M{"error": "原密码错误"})
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		writeJSON(w, http.StatusUnauthorized, M{"error": "未认证"})
 		return
+	}
+	// Only super_admin can reset any user's password;
+	// regular users can only reset their own password.
+	if claims.RoleCode != auth.RoleSuperAdmin && claims.UserID != targetID {
+		writeJSON(w, http.StatusForbidden, M{"error": "无权限重置该用户密码"})
+		return
+	}
+
+	// Verify old password:
+	// - super_admin can skip this check by leaving old_password empty
+	// - regular users MUST provide and pass old_password verification
+	isSuperAdmin := claims.RoleCode == auth.RoleSuperAdmin
+	if !isSuperAdmin && body.OldPassword == "" {
+		writeJSON(w, http.StatusForbidden, M{"error": "请提供原密码"})
+		return
+	}
+	if !isSuperAdmin || body.OldPassword != "" {
+		currentHash, err := h.repo.GetPasswordHash(r.Context(), targetID)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, M{"error": "用户不存在"})
+			return
+		}
+		if err := auth.CheckPassword(currentHash, body.OldPassword); err != nil {
+			writeJSON(w, http.StatusForbidden, M{"error": "原密码错误"})
+			return
+		}
 	}
 	hash, err := auth.HashPassword(body.NewPassword)
 	if err != nil {
 		serverErr(w, err)
 		return
 	}
-	if err := h.repo.ResetPassword(r.Context(), pathID(r.URL.Path), hash); err != nil {
+	if err := h.repo.ResetPassword(r.Context(), targetID, hash); err != nil {
 		writeJSON(w, http.StatusNotFound, M{"error": "用户不存在"})
 		return
 	}
@@ -113,7 +162,18 @@ func (h *AdminHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.DeleteUser(r.Context(), pathID(r.URL.Path)); err != nil {
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		writeJSON(w, http.StatusUnauthorized, M{"error": "未认证"})
+		return
+	}
+	// Only super_admin can delete users.
+	if claims.RoleCode != auth.RoleSuperAdmin {
+		writeJSON(w, http.StatusForbidden, M{"error": "无权限删除用户"})
+		return
+	}
+	id := pathID(r)
+	if err := h.repo.DeleteUser(r.Context(), id); err != nil {
 		serverErr(w, err)
 		return
 	}
@@ -135,6 +195,16 @@ func (h *AdminHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		writeJSON(w, http.StatusUnauthorized, M{"error": "未认证"})
+		return
+	}
+	// Only super_admin can create agents.
+	if claims.RoleCode != auth.RoleSuperAdmin {
+		writeJSON(w, http.StatusForbidden, M{"error": "无权限创建代理商"})
+		return
+	}
 	var body struct {
 		Name string `json:"name"`
 	}
@@ -151,6 +221,16 @@ func (h *AdminHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		writeJSON(w, http.StatusUnauthorized, M{"error": "未认证"})
+		return
+	}
+	if claims.RoleCode != auth.RoleSuperAdmin {
+		writeJSON(w, http.StatusForbidden, M{"error": "无权限修改代理商"})
+		return
+	}
+	id := pathID(r)
 	var body struct {
 		Name string `json:"name"`
 	}
@@ -158,7 +238,7 @@ func (h *AdminHandler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, M{"error": "名称不能为空"})
 		return
 	}
-	if err := h.repo.UpdateAgent(r.Context(), pathID(r.URL.Path), body.Name); err != nil {
+	if err := h.repo.UpdateAgent(r.Context(), id, body.Name); err != nil {
 		writeJSON(w, http.StatusNotFound, M{"error": "代理商不存在"})
 		return
 	}
@@ -166,7 +246,17 @@ func (h *AdminHandler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) DeleteAgent(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.DeleteAgent(r.Context(), pathID(r.URL.Path)); err != nil {
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		writeJSON(w, http.StatusUnauthorized, M{"error": "未认证"})
+		return
+	}
+	if claims.RoleCode != auth.RoleSuperAdmin {
+		writeJSON(w, http.StatusForbidden, M{"error": "无权限删除代理商"})
+		return
+	}
+	id := pathID(r)
+	if err := h.repo.DeleteAgent(r.Context(), id); err != nil {
 		serverErr(w, err)
 		return
 	}
@@ -200,7 +290,7 @@ func (h *AdminHandler) ListPermissions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) GetRolePermissions(w http.ResponseWriter, r *http.Request) {
-	roleID := pathID(r.URL.Path)
+	roleID := pathID(r)
 	ids, err := h.repo.ListRolePermissions(r.Context(), roleID)
 	if err != nil {
 		serverErr(w, err)
@@ -213,6 +303,15 @@ func (h *AdminHandler) GetRolePermissions(w http.ResponseWriter, r *http.Request
 }
 
 func (h *AdminHandler) SetRolePermissions(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		writeJSON(w, http.StatusUnauthorized, M{"error": "未认证"})
+		return
+	}
+	if claims.RoleCode != auth.RoleSuperAdmin {
+		writeJSON(w, http.StatusForbidden, M{"error": "无权限设置角色权限"})
+		return
+	}
 	var body struct {
 		PermIDs []int `json:"perm_ids"`
 	}
@@ -220,7 +319,8 @@ func (h *AdminHandler) SetRolePermissions(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
 		return
 	}
-	if err := h.repo.SetRolePermissions(r.Context(), pathID(r.URL.Path), body.PermIDs); err != nil {
+	roleID := pathID(r)
+	if err := h.repo.SetRolePermissions(r.Context(), roleID, body.PermIDs); err != nil {
 		serverErr(w, err)
 		return
 	}

@@ -3,9 +3,7 @@ node_modules/
 miniapp/node_modules/
 
 # Build
-server.exe
-server.exe~
-server2.exe
+*.exe
 *.exe~
 web/admin/dist/
 web/dashboard/dist/

@@ -2,7 +2,11 @@
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+
+	"github.com/jackc/pgx/v5"
+
 	"xmeco/internal/domain"
 )
 
@@ -37,6 +41,9 @@ func (r *ProjectRepo) GetByID(ctx context.Context, id int) (*domain.Project, err
 	err := r.pool.QueryRow(ctx, `SELECT id, COALESCE(name,''), agent_id, COALESCE(address,''), COALESCE(admin_code,''), city_id, COALESCE(city_name,''), created_at FROM project WHERE id=$1`, id).
 		Scan(&p.ID, &p.Name, &p.AgentID, &p.Address, &p.AdminCode, &p.CityID, &p.CityName, &p.CreatedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &p, nil

@@ -9,6 +9,7 @@
 </view></template>
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'; import { api } from '../../api/client';
+import { AuthError } from '../../api/client';
 const alarms = ref([] as any[])
 const deviceId = ref('')
 onMounted(async () => {
@@ -17,10 +18,10 @@ onMounted(async () => {
     const opts = (pages[pages.length-1] as any).options || {};
     deviceId.value = opts.device_id || '';
     let path = '/alarm-logs';
-    if (deviceId.value) path += '?device_id=' + deviceId.value;
+    if (deviceId.value) path += '?device_id=' + encodeURIComponent(deviceId.value);
     const r = await api.get(path);
-    alarms.value = (r.data as any)
-  } catch {}
+    alarms.value = (r.data as any) || []
+  } catch (e) { if (!(e instanceof AuthError)) uni.showToast({ title: '告警加载失败', icon: 'none' }) }
 })
 </script>
 <style>

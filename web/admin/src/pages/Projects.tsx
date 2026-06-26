@@ -3,10 +3,7 @@ import { Table, Button, Modal, Form, Input, Space, message, Popconfirm, Select, 
 import { PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
-
-interface Project { id: number; name: string; agent_id: number | null; address: string; admin_code: string; city_id: number | null; city_name: string; created_at: string }
-interface Building { id: number; project_id: number; name: string }
-interface City { id: number; name: string; province: string; admin_code: string }
+import type { Project, Building, City } from '../types';
 
 export default function Projects() {
   const [data, setData] = useState<Project[]>([]);

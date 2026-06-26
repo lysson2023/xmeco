@@ -23,17 +23,22 @@
 </view>
 </template>
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import { api } from '../../api/client';
 const username = ref(''), password = ref(''), loading = ref(false);
+onMounted(() => {
+  // 已登录用户直接跳转首页
+  if (api.getToken()) {
+    uni.switchTab({ url: '/pages/index/index' })
+  }
+});
 const doLogin = async () => {
   if (!username.value || !password.value) { uni.showToast({ title: '请输入用户名和密码', icon: 'none' }); return; }
   loading.value = true;
   try {
-    const d = await api.login(username.value, password.value) as any;
-    uni.setStorageSync('user', JSON.stringify(d.user));
+    await api.login(username.value, password.value);
     uni.switchTab({ url: '/pages/index/index' });
-  } catch(e) { uni.showToast({ title: 'Login failed', icon: 'none' }); }
+  } catch(e: any) { uni.showToast({ title: e?.message || '登录失败', icon: 'none' }); }
   finally { loading.value = false; }
 };
 </script>

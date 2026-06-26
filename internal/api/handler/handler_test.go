@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,50 +18,29 @@ func TestMParse(t *testing.T) {
 	}
 }
 
-func TestPathIDTrailingSlash(t *testing.T) {
-	// Paths with trailing slashes should still work
-	if pathID("/api/v1/projects/7/") != 7 {
-		t.Error("trailing slash not handled")
-	}
-}
-
-func TestPathIDMultipleSegments(t *testing.T) {
-	// pathID skips non-numeric segments to find the last numeric one
-	if pathID("/a/b/c/d/e/f/123/g") != 123 {
-		t.Error("should return 123 by skipping non-numeric 'g'")
-	}
-	if pathID("/a/b/c/d/e/f/123") != 123 {
-		t.Error("last numeric segment should return 123")
-	}
-}
-
-// ---- pathID (skips non-numeric suffixes like "control", "execute", "ack") ----
-
 func TestPathID(t *testing.T) {
 	tests := []struct {
-		path string
-		want int
+		name      string
+		pathValue string
+		want      int
 	}{
-		{"/api/v1/devices/5", 5},
-		{"/api/v1/devices/5/control", 5},
-		{"/api/v1/startup-plans/3/execute", 3},
-		{"/api/v1/alarm-logs/7/ack", 7},
-		{"/api/v1/devices/0", 0},
-		{"/api/v1/devices/abc", 0},
-		{"/", 0},
+		{"numeric", "5", 5},
+		{"zero", "0", 0},
+		{"empty", "", 0},
+		{"non-numeric", "abc", 0},
+		{"large number", "12345", 12345},
 	}
 	for _, tt := range tests {
-		got := pathID(tt.path)
-		if got != tt.want {
-			t.Errorf("pathID(%q) = %d, want %d", tt.path, got, tt.want)
-		}
-	}
-}
-
-func TestPathIDMultiAction(t *testing.T) {
-	// path with multiple non-numeric suffixes after ID
-	if pathID("/api/devices/42/control/extra") != 42 {
-		t.Error("should extract 42 even with extra segments")
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/", nil)
+			if tt.pathValue != "" {
+				r.SetPathValue("id", tt.pathValue)
+			}
+			got := pathID(r)
+			if got != tt.want {
+				t.Errorf("pathID() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -95,7 +75,7 @@ func TestNotFound(t *testing.T) {
 
 func TestServerErr(t *testing.T) {
 	rec := httptest.NewRecorder()
-	serverErr(rec, &testError{"database connection failed"})
+	serverErr(rec, errors.New("database connection failed"))
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", rec.Code)
 	}
@@ -104,10 +84,6 @@ func TestServerErr(t *testing.T) {
 		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
 }
-
-type testError struct{ msg string }
-
-func (e *testError) Error() string { return e.msg }
 
 func TestQueryIntMultipleKeys(t *testing.T) {
 	req := httptest.NewRequest("GET", "/test?id=10&device_id=5&metric=A", nil)

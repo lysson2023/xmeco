@@ -1,8 +1,7 @@
-﻿package transport
+package transport
 
 import (
 	"fmt"
-	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -12,43 +11,36 @@ import (
 
 // TransparentTransport handles raw Modbus RTU over TCP (e.g., G770 DTU)
 type TransparentTransport struct {
-	conn    net.Conn
-	id      string // IP:Port or registered ID
-	timeout time.Duration
-	mu      sync.Mutex
-	closed  bool
+	conn         net.Conn
+	id           string // IP:Port or registered ID
+	timeout      time.Duration
+	mu           sync.Mutex
+	closed       bool
+	lastActivity time.Time // tracks last successful I/O for connection health
 }
 
 func NewTransparentTransport(conn net.Conn, id string) *TransparentTransport {
 	return &TransparentTransport{
-		conn:    conn,
-		id:      id,
-		timeout: 10 * time.Second,
+		conn:         conn,
+		id:           id,
+		timeout:      10 * time.Second,
+		lastActivity: time.Now(),
 	}
 }
 
 func (t *TransparentTransport) Type() GatewayType { return TypeTransparent }
 func (t *TransparentTransport) GatewayID() string { return t.id }
 
-// IsConnected checks connection health by performing a non-blocking read probe.
+// IsConnected checks connection health using last-activity timestamp.
+// This avoids consuming real data bytes from the stream (which the old 1-byte
+// read probe did, causing protocol-level corruption on unsolicited data).
 func (t *TransparentTransport) IsConnected() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.conn == nil || t.closed {
 		return false
 	}
-	// Read 1 byte with 1ms deadline to detect broken pipe.
-	t.conn.SetReadDeadline(time.Now().Add(1 * time.Millisecond))
-	buf := make([]byte, 1)
-	_, err := t.conn.Read(buf)
-	if err != nil {
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return true
-		}
-		slog.Warn("dtu transport connection lost", "gw", t.id, "err", err)
-		return false
-	}
-	return true
+	return time.Since(t.lastActivity) < t.timeout*2
 }
 
 func (t *TransparentTransport) SendAndReceive(data []byte) ([]byte, error) {
@@ -82,8 +74,11 @@ func (t *TransparentTransport) SendAndReceive(data []byte) ([]byte, error) {
 	// Read at least 3 bytes (addr + func + byteCount/status)
 	for total < 3 && time.Now().Before(deadline) {
 		t.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-		n, _ := t.conn.Read(buf[total:])
+		n, err := t.conn.Read(buf[total:])
 		if n > 0 { total += n }
+		if err != nil {
+			if ne, ok := err.(net.Error); !ok || !ne.Timeout() { break }
+		}
 	}
 	if total < 3 { return nil, fmt.Errorf("dtu: no response") }
 
@@ -107,9 +102,14 @@ func (t *TransparentTransport) SendAndReceive(data []byte) ([]byte, error) {
 	// Read remaining bytes
 	for total < expectedLen && time.Now().Before(deadline) {
 		t.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-		n, _ := t.conn.Read(buf[total:])
+		n, err := t.conn.Read(buf[total:])
 		if n > 0 { total += n }
+		if err != nil {
+			if ne, ok := err.(net.Error); !ok || !ne.Timeout() { break }
+		}
 	}
+
+	t.lastActivity = time.Now()
 
 	result := buf[:total]
 	if !modbus.VerifyCRC(result) {

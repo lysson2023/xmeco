@@ -32,9 +32,15 @@ func (h *DashboardHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		cfg[k] = v
 	}
 	var online, alarms, baseDays int
-	h.pool.QueryRow(r.Context(), `SELECT count(*) FROM device WHERE online_status='在线'`).Scan(&online)
-	h.pool.QueryRow(r.Context(), `SELECT count(*) FROM alarm_log WHERE created_at::date=CURRENT_DATE`).Scan(&alarms)
-	h.pool.QueryRow(r.Context(), `SELECT COALESCE(EXTRACT(DAY FROM NOW()-date(value))::int,0) FROM dashboard_config WHERE key='days_start'`).Scan(&baseDays)
+	if err := h.pool.QueryRow(r.Context(), `SELECT count(*) FROM device WHERE online_status='在线'`).Scan(&online); err != nil {
+		slog.Warn("dashboard online count failed", "err", err)
+	}
+	if err := h.pool.QueryRow(r.Context(), `SELECT count(*) FROM alarm_log WHERE created_at::date=CURRENT_DATE`).Scan(&alarms); err != nil {
+		slog.Warn("dashboard alarms count failed", "err", err)
+	}
+	if err := h.pool.QueryRow(r.Context(), `SELECT COALESCE(EXTRACT(DAY FROM NOW()-date(value))::int,0) FROM dashboard_config WHERE key='days_start'`).Scan(&baseDays); err != nil {
+		slog.Warn("dashboard base days failed", "err", err)
+	}
 	cfg["running_days"] = fmt.Sprint(1000 + baseDays)
 	cfg["online_devices"] = fmt.Sprint(online)
 	cfg["today_alarms"] = fmt.Sprint(alarms)
@@ -70,18 +76,37 @@ func (h *DashboardHandler) ScreenData(w http.ResponseWriter, r *http.Request) {
 		out["agent_name"] = an
 	}
 
-	// Projects — filter by assigned users if any assignments exist
+	// Projects — filter by assigned users; if no assignments, return empty (not all projects)
 	var userID int
 	if claims != nil { userID = claims.UserID }
-	var assigned int
-	h.pool.QueryRow(ctx, `SELECT count(*) FROM project_user WHERE user_id=$1`, userID).Scan(&assigned)
 	var projQ string
 	var projArgs []any
-	if assigned > 0 {
-		projQ = `SELECT p.id,p.name FROM project p JOIN project_user pu ON pu.project_id=p.id WHERE pu.user_id=$1 ORDER BY p.id`
-		projArgs = []any{userID}
+	if userID > 0 {
+		// 检查该用户是否被分配了项目
+		var assigned int
+		if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM project_user WHERE user_id=$1`, userID).Scan(&assigned); err != nil {
+			slog.Warn("ScreenData project_user count failed", "err", err)
+		}
+		if assigned > 0 {
+			// 只返回被分配的项目
+			projQ = `SELECT p.id,p.name FROM project p JOIN project_user pu ON pu.project_id=p.id WHERE pu.user_id=$1 ORDER BY p.id`
+			projArgs = []any{userID}
+		} else {
+			// 检查是否为超级管理员（super_admin 角色），超管可看所有项目
+			var roleCode string
+			if err := h.pool.QueryRow(ctx, `SELECT r.code FROM users u JOIN role r ON r.id=u.role_id WHERE u.id=$1`, userID).Scan(&roleCode); err != nil {
+				slog.Warn("ScreenData role code query failed", "err", err)
+			}
+			if roleCode == "super_admin" {
+				projQ = `SELECT id,name FROM project ORDER BY id`
+			} else {
+				// 普通用户未分配项目 → 返回空列表
+				projQ = `SELECT id,name FROM project WHERE 1=0`
+			}
+		}
 	} else {
-		projQ = `SELECT id,name FROM project ORDER BY id`
+		// 未认证用户 → 返回空列表
+		projQ = `SELECT id,name FROM project WHERE 1=0`
 	}
 	pr, err := h.pool.Query(ctx, projQ, projArgs...)
 	if err != nil {
@@ -165,7 +190,9 @@ func (h *DashboardHandler) ScreenData(w http.ResponseWriter, r *http.Request) {
 
 	// Weather — use the weather service (cache + live wttr.in fetch with stale fallback)
 	var cityName string
-	h.pool.QueryRow(ctx, `SELECT COALESCE(c.name,'') FROM project p LEFT JOIN city c ON c.id=p.city_id WHERE p.id=$1`, pid).Scan(&cityName)
+	if err := h.pool.QueryRow(ctx, `SELECT COALESCE(c.name,'') FROM project p LEFT JOIN city c ON c.id=p.city_id WHERE p.id=$1`, pid).Scan(&cityName); err != nil {
+		slog.Warn("ScreenData city name query failed", "err", err)
+	}
 	if cityName != "" {
 		if wd, err := h.weatherSvc.GetNowByCityName(ctx, cityName); err == nil && wd != nil {
 			out["weather"] = map[string]string{
@@ -218,20 +245,27 @@ func (h *DashboardHandler) ScreenData(w http.ResponseWriter, r *http.Request) {
 
 	// Energy
 	var savingRate, meterPower float64
-	h.pool.QueryRow(ctx, `SELECT COALESCE(save_rate,0) FROM building WHERE ($1=0 OR id=$1) ORDER BY id LIMIT 1`, bid).Scan(&savingRate)
-	h.pool.QueryRow(ctx, `SELECT COALESCE(SUM(v),0) FROM (SELECT DISTINCT ON(device_id) value v FROM device_telemetry WHERE metric IN ('有功功率','active_power','P') AND device_id IN (SELECT id FROM device WHERE device_type='电表' AND ($1=0 OR building_id IN (SELECT id FROM building WHERE project_id=$1)) AND ($2=0 OR building_id=$2)) ORDER BY device_id,ts DESC) _`, pid, bid).Scan(&meterPower)
+	if err := h.pool.QueryRow(ctx, `SELECT COALESCE(save_rate,0) FROM building WHERE ($1=0 OR id=$1) ORDER BY id LIMIT 1`, bid).Scan(&savingRate); err != nil {
+		slog.Warn("ScreenData save_rate query failed", "err", err)
+	}
+	if err := h.pool.QueryRow(ctx, `SELECT COALESCE(SUM(CASE WHEN COALESCE(d.power_sign,1)=-1 THEN -v ELSE v END),0) FROM (SELECT DISTINCT ON(device_id) device_id, value v FROM device_telemetry WHERE metric IN ('有功功率','active_power','P') AND device_id IN (SELECT id FROM device WHERE device_type='电表' AND ($1=0 OR building_id IN (SELECT id FROM building WHERE project_id=$1)) AND ($2=0 OR building_id=$2)) ORDER BY device_id,ts DESC) _ JOIN device d ON d.id=_.device_id`, pid, bid).Scan(&meterPower); err != nil {
+		slog.Warn("ScreenData meter_power query failed", "err", err)
+	}
 	out["saving_rate"] = savingRate
 	out["meter_power"] = meterPower
-	out["power_saved"] = meterPower * savingRate / 100
-	out["carbon_saved"] = meterPower * savingRate / 100 * 0.58
+	// savingRate stored as decimal (e.g., 0.25 = 25%), so multiply directly — no /100 needed.
+	out["power_saved"] = meterPower * savingRate
+	out["carbon_saved"] = meterPower * savingRate * 0.58
 
 	// Running days
 	var days int
-	h.pool.QueryRow(ctx, `SELECT COALESCE(EXTRACT(DAY FROM NOW()-MIN(created_at))::int,0) FROM project WHERE ($1=0 OR id=$1)`, pid).Scan(&days)
+	if err := h.pool.QueryRow(ctx, `SELECT COALESCE(EXTRACT(DAY FROM NOW()-MIN(created_at))::int,0) FROM project WHERE ($1=0 OR id=$1)`, pid).Scan(&days); err != nil {
+		slog.Warn("ScreenData running days query failed", "err", err)
+	}
 	out["running_days"] = days
 
-	// Individual meters
-	mr, err := h.pool.Query(ctx, `SELECT d.name,COALESCE((SELECT value FROM device_telemetry WHERE device_id=d.id AND metric IN ('有功功率','active_power','P') ORDER BY ts DESC LIMIT 1),0) FROM device d WHERE d.device_type='电表' AND ($1=0 OR d.building_id IN (SELECT id FROM building WHERE project_id=$1)) AND ($2=0 OR d.building_id=$2) ORDER BY d.id`, pid, bid)
+	// Individual meters (返回 power_sign 供前端显示加减标记)
+	mr, err := h.pool.Query(ctx, `SELECT d.name,COALESCE(d.power_sign,1),COALESCE((SELECT value FROM device_telemetry WHERE device_id=d.id AND metric IN ('有功功率','active_power','P') ORDER BY ts DESC LIMIT 1),0) FROM device d WHERE d.device_type='电表' AND ($1=0 OR d.building_id IN (SELECT id FROM building WHERE project_id=$1)) AND ($2=0 OR d.building_id=$2) ORDER BY d.id`, pid, bid)
 	if err != nil {
 		slog.Warn("ScreenData meters query failed", "err", err)
 	}
@@ -240,9 +274,10 @@ func (h *DashboardHandler) ScreenData(w http.ResponseWriter, r *http.Request) {
 		defer mr.Close()
 		for mr.Next() {
 			var n string
+			var sign int
 			var p float64
-			if mr.Scan(&n, &p) == nil {
-				meters = append(meters, map[string]any{"name": n, "power": p})
+			if mr.Scan(&n, &sign, &p) == nil {
+				meters = append(meters, map[string]any{"name": n, "sign": sign, "power": p})
 			}
 		}
 	}

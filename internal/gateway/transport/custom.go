@@ -1,9 +1,8 @@
-﻿package transport
+package transport
 
 import (
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -19,47 +18,40 @@ const (
 
 // CustomTransport handles the 0x68/0x16 proprietary gateway protocol
 type CustomTransport struct {
-	conn     net.Conn
-	mac      []byte
-	macStr   string
-	timeout  time.Duration
-	mu       sync.Mutex
-	closed   bool
+	conn         net.Conn
+	mac          []byte
+	macStr       string
+	timeout      time.Duration
+	mu           sync.Mutex
+	closed       bool
+	lastActivity time.Time // tracks last successful I/O for connection health
 }
 
 func NewCustomTransport(conn net.Conn, mac []byte) *CustomTransport {
 	return &CustomTransport{
-		conn:    conn,
-		mac:     mac,
-		macStr:  hex.EncodeToString(mac),
-		timeout: 10 * time.Second,
+		conn:         conn,
+		mac:          mac,
+		macStr:       hex.EncodeToString(mac),
+		timeout:      10 * time.Second,
+		lastActivity: time.Now(),
 	}
 }
 
 func (t *CustomTransport) Type() GatewayType { return TypeCustom }
 func (t *CustomTransport) GatewayID() string { return t.macStr }
 
-// IsConnected checks connection health by performing a non-blocking read probe.
+// IsConnected checks connection health using last-activity timestamp.
+// This avoids consuming real data bytes from the stream (which the old 1-byte
+// read probe did, causing protocol-level corruption on unsolicited data).
 func (t *CustomTransport) IsConnected() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.conn == nil || t.closed {
 		return false
 	}
-	// Read 1 byte with 1ms deadline to detect broken pipe without consuming
-	// meaningful data (the byte is discarded).
-	t.conn.SetReadDeadline(time.Now().Add(1 * time.Millisecond))
-	buf := make([]byte, 1)
-	_, err := t.conn.Read(buf)
-	if err != nil {
-		// Timeout means connection is alive; any other error means dead.
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return true
-		}
-		slog.Warn("custom transport connection lost", "gw", t.macStr, "err", err)
-		return false
-	}
-	return true
+	// If we've had successful I/O within 2x the timeout, consider it alive.
+	// A real keepalive or poll cycle will refresh this timestamp regularly.
+	return time.Since(t.lastActivity) < t.timeout*2
 }
 
 func (t *CustomTransport) SendAndReceive(data []byte) ([]byte, error) {
@@ -84,6 +76,7 @@ func (t *CustomTransport) SendAndReceive(data []byte) ([]byte, error) {
 		t.closed = true
 		return nil, fmt.Errorf("custom recv: %w", err)
 	}
+	t.lastActivity = time.Now()
 
 	// Unwrap: verify 0x68/0x16, checksum, extract modbus payload
 	return t.unwrap(buf[:n])

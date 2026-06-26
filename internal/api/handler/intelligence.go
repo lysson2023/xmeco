@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -14,6 +15,23 @@ type IntelligenceHandler struct {
 	svc *intelligence.Service
 }
 
+// parseTimeParam parses a string into time.Time, supporting multiple formats:
+// RFC 3339, "2006-01-02T15:04:05", "2006-01-02".
+// Empty string returns zero time with nil error.
+func parseTimeParam(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	t, e := time.Parse(time.RFC3339, s)
+	if e != nil {
+		t, e = time.Parse("2006-01-02T15:04:05", s)
+	}
+	if e != nil {
+		t, e = time.Parse("2006-01-02", s)
+	}
+	return t, e
+}
+
 func NewIntelligenceHandler(pool *pgxpool.Pool) *IntelligenceHandler {
 	return &IntelligenceHandler{svc: intelligence.New(pool)}
 }
@@ -22,7 +40,7 @@ func NewIntelligenceHandler(pool *pgxpool.Pool) *IntelligenceHandler {
 func (h *IntelligenceHandler) FullAnalysis(w http.ResponseWriter, r *http.Request) {
 	result, err := h.svc.RunFullAnalysis(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		serverErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -32,7 +50,7 @@ func (h *IntelligenceHandler) FullAnalysis(w http.ResponseWriter, r *http.Reques
 func (h *IntelligenceHandler) Efficiency(w http.ResponseWriter, r *http.Request) {
 	items, err := h.svc.AnalyzeEfficiency(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		serverErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
@@ -40,14 +58,20 @@ func (h *IntelligenceHandler) Efficiency(w http.ResponseWriter, r *http.Request)
 
 // Forecast returns 24h load forecast.
 func (h *IntelligenceHandler) Forecast(w http.ResponseWriter, r *http.Request) {
-	temp, _ := h.svc.GetWeatherTemp(r.Context())
+	temp, err := h.svc.GetWeatherTemp(r.Context())
+	if err != nil {
+		slog.Warn("weather temp unavailable, using 0", "err", err)
+	}
 	forecast := h.svc.ForecastLoad(r.Context(), temp)
 	writeJSON(w, http.StatusOK, forecast)
 }
 
 // Recommendations returns setpoint optimization suggestions.
 func (h *IntelligenceHandler) Recommendations(w http.ResponseWriter, r *http.Request) {
-	temp, _ := h.svc.GetWeatherTemp(r.Context())
+	temp, err := h.svc.GetWeatherTemp(r.Context())
+	if err != nil {
+		slog.Warn("weather temp unavailable, using 0", "err", err)
+	}
 	recs := h.svc.RecommendSetpoints(r.Context(), temp)
 	writeJSON(w, http.StatusOK, recs)
 }
@@ -56,7 +80,7 @@ func (h *IntelligenceHandler) Recommendations(w http.ResponseWriter, r *http.Req
 func (h *IntelligenceHandler) Strategies(w http.ResponseWriter, r *http.Request) {
 	result, err := h.svc.RunStrategies(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		serverErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -76,7 +100,7 @@ func (h *IntelligenceHandler) SavePriceConfig(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err := h.svc.SavePriceConfig(r.Context(), periods); err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		serverErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, M{"status": "saved"})
@@ -93,28 +117,15 @@ func (h *IntelligenceHandler) PowerQuality(w http.ResponseWriter, r *http.Reques
 	endStr := r.URL.Query().Get("end")
 	var start, end time.Time
 	var err error
-	parseTime := func(s string) (time.Time, error) {
-		if s == "" {
-			return time.Time{}, nil
-		}
-		t, e := time.Parse(time.RFC3339, s)
-		if e != nil {
-			t, e = time.Parse("2006-01-02T15:04:05", s)
-		}
-		if e != nil {
-			t, e = time.Parse("2006-01-02", s)
-		}
-		return t, e
-	}
 	if startStr != "" {
-		start, err = parseTime(startStr)
+		start, err = parseTimeParam(startStr)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, M{"error": "start 时间格式错误"})
 			return
 		}
 	}
 	if endStr != "" {
-		end, err = parseTime(endStr)
+		end, err = parseTimeParam(endStr)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, M{"error": "end 时间格式错误"})
 			return
@@ -124,8 +135,7 @@ func (h *IntelligenceHandler) PowerQuality(w http.ResponseWriter, r *http.Reques
 	if start.IsZero() && end.IsZero() {
 		end = time.Now()
 		start = end.Add(-24 * time.Hour)
-	} else if start.IsZero() {
-		end = time.Now()
+	} else if start.IsZero() && !end.IsZero() {
 		start = end.Add(-24 * time.Hour)
 	} else if end.IsZero() {
 		end = time.Now()
@@ -133,7 +143,7 @@ func (h *IntelligenceHandler) PowerQuality(w http.ResponseWriter, r *http.Reques
 
 	result, err := h.svc.AnalyzePowerQuality(r.Context(), deviceID, start, end)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		serverErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -144,7 +154,7 @@ func (h *IntelligenceHandler) MeterDevices(w http.ResponseWriter, r *http.Reques
 	buildingID := queryInt(r, "building_id")
 	devices, err := h.svc.ListMeters(r.Context(), buildingID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		serverErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, devices)

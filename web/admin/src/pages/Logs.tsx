@@ -64,11 +64,11 @@ export default function Logs() {
     if(selDevice) params += '&device_id='+selDevice;
     if(interval&&interval!=='raw') params += '&interval='+interval;
     if(activeTab==='telemetry'){
-      api.get('/logs/telemetry'+params).then(r=>{setData(r.data);setLoading(false);});
+      api.get('/logs/telemetry'+params).then(r=>{setData(r.data);setLoading(false);}).catch(()=>setLoading(false));
     }else if(activeTab==='controls'){
-      api.get('/logs/controls'+params).then(r=>{setData(r.data);setLoading(false);});
+      api.get('/logs/controls'+params).then(r=>{setData(r.data);setLoading(false);}).catch(()=>setLoading(false));
     }else{
-      api.get('/logs/stats'+params).then(r=>{setStats(r.data);setLoading(false);});
+      api.get('/logs/stats'+params).then(r=>{setStats(r.data);setLoading(false);}).catch(()=>setLoading(false));
     }
   };
 
@@ -90,7 +90,8 @@ export default function Logs() {
     }
   };
 
-  useEffect(() => { fetchData(); }, [activeTab, interval]);
+  // 手动查询模式：仅在 activeTab/interval 变化时自动加载，切换设备/日期需点击"查询"按钮
+  useEffect(() => { fetchData(); }, [activeTab, interval]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const telemetryCols = interval!=='raw' ? [
     { title:'时间', dataIndex:'ts', width:160, render:(v:any)=>dayjs(v).format('YYYY-MM-DD HH:mm') },

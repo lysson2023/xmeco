@@ -1,3 +1,9 @@
+> **🤖 AI AGENTS — READ THIS FIRST**
+> Before making any changes to this codebase, you MUST read [`agents.md`](./agents.md).
+> It contains: tech stack baseline (do NOT upgrade), architecture rules, forbidden patterns, naming conventions, test requirements, and migration rules.
+
+---
+
 # XMECO 多智能体能效节能系统
 
 ## 项目概述

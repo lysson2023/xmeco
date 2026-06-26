@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 )
 
 // devRow holds a device row from the initial query.
@@ -74,8 +75,13 @@ func (s *Service) AnalyzeEfficiency(ctx context.Context) ([]EfficiencyItem, erro
 				// Cooling capacity from rated power × design COP × part-load factor.
 				// Non-linear: chillers peak at 70–80 % load, drop off at low loads.
 				coolingKW := ratedKW * designCOP * chillerPartLoadFactor(item.LoadPct)
-				item.COP = round2(coolingKW / item.PowerKW)
-				item.Efficiency = round2(item.COP / designCOP * 100)
+				if item.PowerKW > 0 {
+					item.COP = round2(coolingKW / item.PowerKW)
+					item.Efficiency = round2(item.COP / designCOP * 100)
+				} else {
+					item.COP = 0
+					item.Efficiency = 0
+				}
 			} else {
 				item.PowerKW = round2(ratedKW * 0.75)
 				item.LoadPct = 75
@@ -128,7 +134,10 @@ func (s *Service) AnalyzeEfficiency(ctx context.Context) ([]EfficiencyItem, erro
 			item.Efficiency = 85
 		}
 
-		// Clamp to valid range.
+		// Clamp to valid range and guard against NaN/Inf.
+		if math.IsNaN(item.Efficiency) || math.IsInf(item.Efficiency, 0) {
+			item.Efficiency = 0
+		}
 		if item.Efficiency > 100 {
 			item.Efficiency = 100
 		}

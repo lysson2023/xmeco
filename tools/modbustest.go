@@ -65,7 +65,7 @@ func main() {
 	// Build response
 	resp := []byte{addr, fc, byte(count * 2)}
 	for i := uint16(0); i < count; i++ {
-		resp = append(resp, byte(start+i<<8), byte(start+i))
+		resp = append(resp, byte((start+i)>>8), byte(start+i))
 	}
 	respCRC := modbus.CRC16(resp)
 	resp = append(resp, byte(respCRC), byte(respCRC>>8))

@@ -7,14 +7,11 @@ import {
 } from '@ant-design/icons';
 import api from '../api/client';
 import type { Dayjs } from 'dayjs';
+import type { EfficiencyItem, MeterInfo } from '../types';
 
 const { RangePicker } = DatePicker;
 
 // ---- Types ----
-interface EfficiencyItem {
-  device_id: number; device_name: string; device_type: string;
-  power_kw: number; load_pct: number; cop: number; efficiency: number; status: string;
-}
 interface ForecastItem { hour: number; temp: number; load_kw: number; load_pct: number; }
 interface Recommendation {
   device_name: string; parameter: string;
@@ -41,7 +38,6 @@ interface RotationItem {
 }
 
 // ---- Power Quality Types ----
-interface MeterInfo { id: number; name: string; building: string; project: string; }
 interface VoltageQuality { avg_v: number; min_v: number; max_v: number; nominal_v: number; deviation_pct: number; qualified_rate: number; samples: number; grade: string; }
 interface CurrentBalance { avg_a: number; avg_b: number; avg_c: number; imbalance_pct: number; max_phase_current: number; samples: number; grade: string; }
 interface PowerFactorQ { avg_pf: number; min_pf: number; max_pf: number; qualified_rate: number; samples: number; grade: string; }

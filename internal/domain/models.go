@@ -29,6 +29,7 @@ type Device struct {
 	PTRatio       int        `json:"pt_ratio"`
 	RatedVoltage  *float64   `json:"rated_voltage"`
 	RatedCurrent  *float64   `json:"rated_current"`
+	PowerSign     int        `json:"power_sign"` // 电表功率方向：1=加，-1=减
 	OnlineStatus  string     `json:"online_status"`
 	DeviceStatus  string     `json:"device_status"`
 	LastOnlineAt  *time.Time `json:"last_online_at"`

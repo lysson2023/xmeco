@@ -2,11 +2,11 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/pashagolub/pgxmock/v4"
 
 	"xmeco/internal/domain"
@@ -79,7 +79,7 @@ func TestBuildingRepoGetByIDNotFound(t *testing.T) {
 	repo := NewBuildingRepo(mock)
 
 	mock.ExpectQuery("SELECT (.+) FROM building WHERE id=\\$1").WithArgs(999).
-		WillReturnError(sql.ErrNoRows)
+		WillReturnError(pgx.ErrNoRows)
 
 	_, err := repo.GetByID(context.TODO(), 999)
 	if err == nil {
@@ -144,9 +144,9 @@ func TestDeviceRepoList(t *testing.T) {
 	repo := NewDeviceRepo(mock)
 	now := time.Now()
 
-	dCols := []string{"id", "building_id", "name", "device_type", "gateway_imei", "gateway_type", "node_address", "device_no", "ct_ratio", "pt_ratio", "rated_voltage", "rated_current", "online_status", "device_status", "last_online_at", "last_record_at", "created_at"}
+	dCols := []string{"id", "building_id", "name", "device_type", "gateway_imei", "gateway_type", "node_address", "device_no", "ct_ratio", "pt_ratio", "rated_voltage", "rated_current", "power_sign", "online_status", "device_status", "last_online_at", "last_record_at", "created_at"}
 	mock.ExpectQuery("SELECT (.+) FROM device").WithArgs(0).
-		WillReturnRows(pgxmock.NewRows(dCols).AddRow(1, 1, "主机1", "主机", nil, "custom", 1, 1, 100, 200, nil, nil, "在线", "运行", nil, nil, now))
+		WillReturnRows(pgxmock.NewRows(dCols).AddRow(1, 1, "主机1", "主机", nil, "custom", 1, 1, 100, 200, nil, nil, 1, "在线", "运行", nil, nil, now))
 
 	list, err := repo.List(context.TODO(), 0)
 	if err != nil {
@@ -163,9 +163,9 @@ func TestDeviceRepoGetByID(t *testing.T) {
 	repo := NewDeviceRepo(mock)
 	now := time.Now()
 
-	dCols2 := []string{"id", "building_id", "name", "device_type", "gateway_imei", "gateway_type", "node_address", "device_no", "ct_ratio", "pt_ratio", "rated_voltage", "rated_current", "online_status", "device_status", "last_online_at", "last_record_at", "created_at"}
+	dCols2 := []string{"id", "building_id", "name", "device_type", "gateway_imei", "gateway_type", "node_address", "device_no", "ct_ratio", "pt_ratio", "rated_voltage", "rated_current", "power_sign", "online_status", "device_status", "last_online_at", "last_record_at", "created_at"}
 	mock.ExpectQuery("SELECT (.+) FROM device WHERE id=\\$1").WithArgs(1).
-		WillReturnRows(pgxmock.NewRows(dCols2).AddRow(1, 1, "主机1", "主机", nil, "custom", 1, 1, 0, 0, nil, nil, "在线", "运行中", nil, nil, now))
+		WillReturnRows(pgxmock.NewRows(dCols2).AddRow(1, 1, "主机1", "主机", nil, "custom", 1, 1, 0, 0, nil, nil, 1, "在线", "运行中", nil, nil, now))
 
 	d, err := repo.GetByID(context.TODO(), 1)
 	if err != nil {
@@ -333,7 +333,7 @@ func TestProjectRepoGetByIDNotFound(t *testing.T) {
 	repo := NewProjectRepo(mock)
 
 	mock.ExpectQuery("SELECT (.+) FROM project WHERE id=\\$1").WithArgs(999).
-		WillReturnError(sql.ErrNoRows)
+		WillReturnError(pgx.ErrNoRows)
 
 	_, err := repo.GetByID(context.TODO(), 999)
 	if err == nil {
@@ -667,9 +667,12 @@ func TestAdminRepoSystemInfo(t *testing.T) {
 	defer mock.Close()
 	repo := NewAdminRepo(mock)
 
-	cols := []string{"version"}
 	mock.ExpectQuery("SELECT version\\(\\)").
-		WillReturnRows(pgxmock.NewRows(cols).AddRow("PostgreSQL 16.0"))
+		WillReturnRows(pgxmock.NewRows([]string{"version"}).AddRow("PostgreSQL 16.0"))
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM schema_migrations").
+		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(12))
+	mock.ExpectQuery("SELECT to_char\\(NOW\\(\\).*").
+		WillReturnRows(pgxmock.NewRows([]string{"to_char"}).AddRow("2026-06-26 12:00:00"))
 
 	info, err := repo.SystemInfo(context.TODO())
 	if err != nil {
@@ -680,5 +683,11 @@ func TestAdminRepoSystemInfo(t *testing.T) {
 	}
 	if info["db_version"] != "PostgreSQL 16.0" {
 		t.Errorf("db_version = %v", info["db_version"])
+	}
+	if info["status"] != "running" {
+		t.Errorf("status = %v", info["status"])
+	}
+	if info["migrations"] != 12 {
+		t.Errorf("migrations = %v", info["migrations"])
 	}
 }

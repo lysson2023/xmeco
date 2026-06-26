@@ -3,9 +3,7 @@ import { Table, Button, Modal, Form, Input, InputNumber, Space, message, Popconf
 import { PlusOutlined } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api/client';
-
-interface Building { id: number; project_id: number; name: string; outdoor_temp: number; outdoor_humidity: number; save_rate: number; created_at: string }
-interface Device { id: number; building_id: number; name: string }
+import type { Building, Device } from '../types';
 
 export default function Buildings() {
   const [data, setData] = useState<Building[]>([]);

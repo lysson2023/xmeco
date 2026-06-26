@@ -36,6 +36,7 @@ export interface Device {
   device_no: number;
   ct_ratio: number;
   pt_ratio: number;
+  power_sign: number;
   rated_voltage: number | null;
   rated_current: number | null;
   online_status: string;

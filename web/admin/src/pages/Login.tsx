@@ -24,8 +24,7 @@ export default function LoginPage() {
       message.success('登录成功');
       navigate('/', { replace: true });
     } catch (err: any) {
-      const msg = err?.response?.data?.error || '登录失败';
-      message.error(msg || '登录失败');
+      message.error(err?.response?.data?.error || '登录失败');
     } finally {
       setLoading(false);
     }

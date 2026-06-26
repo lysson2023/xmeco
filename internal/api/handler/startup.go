@@ -75,23 +75,34 @@ func (h *StartupHandler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.PlanType == "" { body.PlanType = "startup" }
+
+	// Wrap both plan creation and step inserts in a transaction to avoid
+	// orphaned plan records on partial step insert failures.
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil { serverErr(w, err); return }
+	defer tx.Rollback(r.Context())
+
 	var id int
-	err := h.pool.QueryRow(r.Context(), "INSERT INTO startup_plan (name,building_id,plan_type) VALUES($1,$2,$3) RETURNING id", body.Name, body.BuildingID, body.PlanType).Scan(&id)
+	err = tx.QueryRow(r.Context(), "INSERT INTO startup_plan (name,building_id,plan_type) VALUES($1,$2,$3) RETURNING id", body.Name, body.BuildingID, body.PlanType).Scan(&id)
 	if err != nil { serverErr(w, err); return }
 	for _, s := range body.Steps {
 		action := s.Action
 		if action == "" { action = body.PlanType }
 		rc := s.RetryCount
 		if rc < 1 { rc = 1 }
-		if _, err := h.pool.Exec(r.Context(), "INSERT INTO startup_step (plan_id,sort_order,device_id,property_id,action,target_value,wait_seconds,retry_count) VALUES($1,$2,$3,0,$4,'',COALESCE($5,30),$6)", id, s.SortOrder, s.DeviceID, action, s.WaitSeconds, rc); err != nil {
-			slog.Warn("create startup step failed", "plan", id, "err", err)
+		ws := s.WaitSeconds
+		if ws <= 0 { ws = 30 }
+		if _, err := tx.Exec(r.Context(), "INSERT INTO startup_step (plan_id,sort_order,device_id,property_id,action,target_value,wait_seconds,retry_count) VALUES($1,$2,$3,0,$4,'',$5,$6)", id, s.SortOrder, s.DeviceID, action, ws, rc); err != nil {
+			serverErr(w, err)
+			return
 		}
 	}
+	if err := tx.Commit(r.Context()); err != nil { serverErr(w, err); return }
 	ok(w, M{"id":fmt.Sprint(id)})
 }
 
 func (h *StartupHandler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
-	id := pathID(r.URL.Path)
+	id := pathID(r)
 	var body struct {
 		Name string `json:"name"`
 		PlanType string `json:"plan_type"`
@@ -121,7 +132,9 @@ func (h *StartupHandler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 		if action == "" { action = body.PlanType }
 		rc := s.RetryCount
 		if rc < 1 { rc = 1 }
-		if _, err := tx.Exec(r.Context(), "INSERT INTO startup_step (plan_id,sort_order,device_id,property_id,action,target_value,wait_seconds,retry_count) VALUES($1,$2,$3,0,$4,'',COALESCE($5,30),$6)", id, s.SortOrder, s.DeviceID, action, s.WaitSeconds, rc); err != nil {
+		ws := s.WaitSeconds
+		if ws <= 0 { ws = 30 }
+		if _, err := tx.Exec(r.Context(), "INSERT INTO startup_step (plan_id,sort_order,device_id,property_id,action,target_value,wait_seconds,retry_count) VALUES($1,$2,$3,0,$4,'',$5,$6)", id, s.SortOrder, s.DeviceID, action, ws, rc); err != nil {
 			serverErr(w, err)
 			return
 		}
@@ -134,22 +147,26 @@ func (h *StartupHandler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *StartupHandler) DeletePlan(w http.ResponseWriter, r *http.Request) {
-	id := pathID(r.URL.Path)
-	if _, err := h.pool.Exec(r.Context(), "DELETE FROM startup_step WHERE plan_id=$1", id); err != nil {
+	id := pathID(r)
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil { serverErr(w, err); return }
+	defer tx.Rollback(r.Context())
+	if _, err := tx.Exec(r.Context(), "DELETE FROM startup_step WHERE plan_id=$1", id); err != nil {
 		serverErr(w, err)
 		return
 	}
-	if _, err := h.pool.Exec(r.Context(), "DELETE FROM startup_plan WHERE id=$1", id); err != nil {
+	if _, err := tx.Exec(r.Context(), "DELETE FROM startup_plan WHERE id=$1", id); err != nil {
 		serverErr(w, err)
 		return
 	}
+	if err := tx.Commit(r.Context()); err != nil { serverErr(w, err); return }
 	ok(w, M{"status":"deleted"})
 }
 
 // Execute loads the plan via orchestrator, writes a proper execution record,
 // and launches execution in a background goroutine.
 func (h *StartupHandler) Execute(w http.ResponseWriter, r *http.Request) {
-	planID := pathID(r.URL.Path)
+	planID := pathID(r)
 
 	plan, steps, err := orchestrator.LoadPlan(r.Context(), h.pool, planID)
 	if err != nil {
@@ -210,16 +227,7 @@ func (h *StartupHandler) execDeviceControl(ctx context.Context, devID int, actio
 		return "", fmt.Errorf("设备 %d 不存在", devID)
 	}
 
-	controlVal := action
-	deviceStatus := ""
-	switch action {
-	case "start", "startup":
-		controlVal = "开机"
-		deviceStatus = "开机"
-	case "stop", "shutdown":
-		controlVal = "关机"
-		deviceStatus = "关机"
-	}
+	controlVal, deviceStatus := controlActionCN(action)
 
 	_, err = h.pool.Exec(ctx, `
 		INSERT INTO control_record (project_name, building_name, device_name, prop_name, control_value, username, user_remark)
@@ -242,7 +250,7 @@ func (h *StartupHandler) execDeviceControl(ctx context.Context, devID int, actio
 }
 
 func (h *StartupHandler) GetExecution(w http.ResponseWriter, r *http.Request) {
-	id := pathID(r.URL.Path)
+	id := pathID(r)
 	var e struct {
 		ID                    int     `json:"id"`
 		PlanID                int     `json:"plan_id"`
@@ -308,7 +316,7 @@ func (h *StartupHandler) GetExecution(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *StartupHandler) StopExecution(w http.ResponseWriter, r *http.Request) {
-	id := pathID(r.URL.Path)
+	id := pathID(r)
 	tag, err := h.pool.Exec(r.Context(),
 		`UPDATE startup_execution SET status='stopped',finished_at=NOW() WHERE id=$1 AND status='running'`, id)
 	if err != nil {
@@ -335,7 +343,7 @@ type scheduledTaskRow struct {
 	ScheduleType string  `json:"schedule_type"`
 	ScheduleTime string  `json:"schedule_time"`
 	DaysOfWeek   *string `json:"days_of_week"`
-	Enabled      bool    `json:"enabled"`
+	Enabled      *bool   `json:"enabled"`
 	LastRunAt    *string `json:"last_run_at"`
 	LastResult   *string `json:"last_result"`
 	CreatedAt    string  `json:"created_at"`
@@ -385,7 +393,7 @@ func (h *StartupHandler) CreateScheduledTask(w http.ResponseWriter, r *http.Requ
 	err := h.pool.QueryRow(r.Context(),
 		`INSERT INTO scheduled_task (name,building_id,device_id,action_type,target_value,schedule_type,schedule_time,days_of_week,enabled)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7::time,$8,$9) RETURNING id`,
-		t.Name, t.BuildingID, t.DeviceID, t.ActionType, t.TargetValue, t.ScheduleType, t.ScheduleTime, t.DaysOfWeek, t.Enabled,
+		t.Name, t.BuildingID, t.DeviceID, t.ActionType, t.TargetValue, t.ScheduleType, t.ScheduleTime, t.DaysOfWeek, boolVal(t.Enabled, true),
 	).Scan(&t.ID)
 	if err != nil { serverErr(w, err); return }
 	created(w, t)
@@ -394,15 +402,39 @@ func (h *StartupHandler) CreateScheduledTask(w http.ResponseWriter, r *http.Requ
 func (h *StartupHandler) UpdateScheduledTask(w http.ResponseWriter, r *http.Request) {
 	var t scheduledTaskRow
 	if err := json.NewDecoder(r.Body).Decode(&t); err != nil { writeJSON(w, 400, M{"error":"格式错误"}); return }
-	_, err := h.pool.Exec(r.Context(),
+	t.ID = pathID(r)
+
+	// Fetch existing record to support partial updates (e.g. toggling just "enabled")
+	var cur scheduledTaskRow
+	err := h.pool.QueryRow(r.Context(),
+		`SELECT name, building_id, device_id, action_type, target_value,
+		        schedule_type, schedule_time, days_of_week, enabled
+		 FROM scheduled_task WHERE id=$1`, t.ID).Scan(
+		&cur.Name, &cur.BuildingID, &cur.DeviceID, &cur.ActionType,
+		&cur.TargetValue, &cur.ScheduleType, &cur.ScheduleTime,
+		&cur.DaysOfWeek, &cur.Enabled,
+	)
+	if err != nil { notFound(w, "定时任务不存在"); return }
+
+	// Merge: use incoming non-zero values, fall back to current
+	if t.Name != "" { cur.Name = t.Name }
+	if t.DeviceID != 0 { cur.DeviceID = t.DeviceID }
+	if t.ActionType != "" { cur.ActionType = t.ActionType }
+	if t.TargetValue != nil { cur.TargetValue = t.TargetValue }
+	if t.ScheduleType != "" { cur.ScheduleType = t.ScheduleType }
+	if t.ScheduleTime != "" { cur.ScheduleTime = t.ScheduleTime }
+	if t.DaysOfWeek != nil { cur.DaysOfWeek = t.DaysOfWeek }
+	if t.Enabled != nil { cur.Enabled = t.Enabled }
+
+	_, err = h.pool.Exec(r.Context(),
 		`UPDATE scheduled_task SET name=$1,device_id=$2,action_type=$3,target_value=$4,schedule_type=$5,schedule_time=$6::time,days_of_week=$7,enabled=$8 WHERE id=$9`,
-		t.Name, t.DeviceID, t.ActionType, t.TargetValue, t.ScheduleType, t.ScheduleTime, t.DaysOfWeek, t.Enabled, pathID(r.URL.Path))
+		cur.Name, cur.DeviceID, cur.ActionType, cur.TargetValue, cur.ScheduleType, cur.ScheduleTime, cur.DaysOfWeek, boolVal(cur.Enabled, true), t.ID)
 	if err != nil { serverErr(w, err); return }
 	ok(w, M{"status":"updated"})
 }
 
 func (h *StartupHandler) DeleteScheduledTask(w http.ResponseWriter, r *http.Request) {
-	_, err := h.pool.Exec(r.Context(), `DELETE FROM scheduled_task WHERE id=$1`, pathID(r.URL.Path))
+	_, err := h.pool.Exec(r.Context(), `DELETE FROM scheduled_task WHERE id=$1`, pathID(r))
 	if err != nil { serverErr(w, err); return }
 	ok(w, M{"status":"deleted"})
 }
@@ -427,7 +459,7 @@ func (h *StartupHandler) RunDueScheduledTasks(ctx context.Context) {
 		   ) = ANY(regexp_split_to_array(COALESCE(st.days_of_week,''), '\s*,\s*')))
 		   OR (st.schedule_type='once' AND st.last_run_at IS NULL))
 		 ORDER BY st.id`)
-	if err != nil { return }
+	if err != nil { slog.Error("RunDueScheduledTasks query failed", "err", err); return }
 	defer rows.Close()
 	for rows.Next() {
 		var id, devID int
@@ -496,12 +528,15 @@ func (h *StartupHandler) executeAction(ctx context.Context, devID int, action st
 }
 
 // dispatchControl forwards a control action to the physical device via the gateway.
-// Best-effort: if no device handler is wired up or the device is offline, it is a no-op
-// (the control_record written by the caller remains as the audit trail).
+// Logs dispatch result but does not fail the caller (the control_record written by the
+// caller remains as the permanent audit trail).
 func (h *StartupHandler) dispatchControl(ctx context.Context, devID int, action string) {
 	if h.dev == nil {
 		slog.Warn("startup/scheduled dispatch skipped: device handler not wired", "dev", devID, "action", action)
 		return
 	}
-	h.dev.dispatchHardware(ctx, devID, action)
+	dr := h.dev.dispatchHardware(ctx, devID, action)
+	if !dr.Dispatched {
+		slog.Warn("startup/scheduled dispatch failed", "dev", devID, "action", action, "msg", dr.Message)
+	}
 }

@@ -22,13 +22,20 @@ func (s *Service) ForecastLoad(ctx context.Context, outdoorTemp float64) []LoadF
 		0.60, 0.40, 0.25, 0.20, 0.18, 0.15, // 18-23
 	}
 
-	// Temperature influence: cooling demand rises ~8% per °C above 22°C
+	// Temperature influence on cooling demand.
+	// Above 22°C: rises ~8% per °C (capped at 2.5x at 40°C+).
+	// Below 18°C: drops to 0.6 (minimal cooling needed).
+	// Between 18–22°C: linear interpolation for smooth transition.
 	tempInfluence := 1.0
-	if outdoorTemp > 22 {
+	if outdoorTemp >= 22 {
 		tempInfluence = 1.0 + (outdoorTemp-22)*0.08
-	}
-	if outdoorTemp < 18 {
+		if tempInfluence > 2.5 {
+			tempInfluence = 2.5
+		}
+	} else if outdoorTemp <= 18 {
 		tempInfluence = 0.6
+	} else {
+		tempInfluence = 0.6 + (outdoorTemp-18)*(1.0-0.6)/(22-18)
 	}
 
 	// Base cooling load estimate — query DB for sum of chiller rated power
@@ -42,9 +49,6 @@ func (s *Service) ForecastLoad(ctx context.Context, outdoorTemp float64) []LoadF
 		tempVariation := outdoorTemp + 5*math.Sin(2*math.Pi*float64(h-14)/24)
 
 		loadKW := baseLoadKW * profile * tempInfluence
-		if outdoorTemp > 30 {
-			loadKW *= 1.15 // extra penalty for hot days
-		}
 
 		result[h] = LoadForecast{
 			Hour:    hour,

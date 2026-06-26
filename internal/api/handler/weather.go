@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -21,7 +22,8 @@ func (h *WeatherHandler) ListCities(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	cities, err := h.svc.SearchCities(r.Context(), q)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		slog.Warn("weather search cities failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, M{"error": "天气服务暂不可用"})
 		return
 	}
 	if cities == nil {
@@ -34,7 +36,8 @@ func (h *WeatherHandler) ListCities(w http.ResponseWriter, r *http.Request) {
 func (h *WeatherHandler) ListProvinceCities(w http.ResponseWriter, r *http.Request) {
 	data, err := h.svc.ListProvinceCities(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		slog.Warn("weather list province cities failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, M{"error": "天气服务暂不可用"})
 		return
 	}
 	writeJSON(w, http.StatusOK, data)
@@ -42,7 +45,7 @@ func (h *WeatherHandler) ListProvinceCities(w http.ResponseWriter, r *http.Reque
 
 // GetCity 获取单个城市信息
 func (h *WeatherHandler) GetCity(w http.ResponseWriter, r *http.Request) {
-	id := pathID(r.URL.Path)
+	id := pathID(r)
 	city, err := h.svc.GetCity(r.Context(), id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, M{"error": "城市不存在"})
@@ -73,7 +76,8 @@ func (h *WeatherHandler) Now(w http.ResponseWriter, r *http.Request) {
 
 	wd, err := h.svc.GetWeather(r.Context(), cityID, cityName)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		slog.Warn("weather get failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, M{"error": "天气服务暂不可用"})
 		return
 	}
 	writeJSON(w, http.StatusOK, wd)
@@ -95,7 +99,8 @@ func (h *WeatherHandler) ProjectWeather(w http.ResponseWriter, r *http.Request) 
 
 	wd, err := h.svc.GetProjectWeather(r.Context(), projectID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		slog.Warn("weather project weather failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, M{"error": "天气服务暂不可用"})
 		return
 	}
 	writeJSON(w, http.StatusOK, wd)

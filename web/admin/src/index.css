@@ -1,0 +1,235 @@
+/* ===== Tailwind v4: 仅引入 theme + utilities，跳过 base(preflight) ==== */
+/* 跳过 base 层以避免与 Ant Design 的 CSS reset 冲突 */
+@import "tailwindcss/theme" layer(theme);
+@import "tailwindcss/utilities" layer(utilities);
+
+/* ===== XMECO Design System — 深色科技风 ===== */
+
+@theme {
+  /* ---------- 色彩系统 ---------- */
+
+  /* 背景色阶 */
+  --color-atmospheric-surface: #040d0d;
+  --color-background: #0b1515;
+  --color-surface: #0b1515;
+  --color-surface-dim: #0b1515;
+  --color-surface-container-lowest: #061010;
+  --color-surface-container-low: #131d1d;
+  --color-surface-container: #172121;
+  --color-surface-container-high: #212c2c;
+  --color-surface-container-highest: #2c3737;
+  --color-surface-bright: #313b3b;
+  --color-inverse-surface: #d9e5e4;
+
+  /* 主色 (Primary) */
+  --color-primary: #95d1d0;
+  --color-primary-container: #004c4c;
+  --color-on-primary: #003737;
+  --color-on-primary-container: #7fbbba;
+  --color-primary-fixed: #b1eeed;
+  --color-primary-fixed-dim: #95d1d0;
+  --color-inverse-primary: #2a6767;
+
+  /* 辅色 (Secondary) — 核心发光色 */
+  --color-secondary: #9cefff;
+  --color-secondary-container: #01daf3;
+  --color-secondary-fixed: #9cefff;
+  --color-secondary-fixed-dim: #01daf3;
+  --color-on-secondary: #00363d;
+  --color-on-secondary-container: #005b67;
+
+  /* 第三色 (Tertiary) */
+  --color-tertiary: #84d4d3;
+  --color-tertiary-container: #004c4c;
+  --color-tertiary-fixed: #a0f0f0;
+  --color-tertiary-fixed-dim: #84d4d3;
+  --color-on-tertiary: #003737;
+  --color-on-tertiary-container: #6ebebd;
+
+  /* 功能色 */
+  --color-error: #ffb4ab;
+  --color-error-container: #93000a;
+  --color-on-error: #690005;
+  --color-on-error-container: #ffdad6;
+
+  /* 发光色 */
+  --color-glow-cyan: rgba(0, 218, 243, 0.4);
+  --color-glow-green: rgba(127, 255, 212, 0.6);
+  --color-glow-blue: rgba(0, 162, 255, 0.6);
+
+  /* 文字 & 边框 */
+  --color-on-surface: #d9e5e4;
+  --color-on-surface-variant: #bfc8c8;
+  --color-on-background: #d9e5e4;
+  --color-outline: #899392;
+  --color-outline-variant: #3f4848;
+  --color-surface-variant: #2c3737;
+
+  /* 玻璃效果 */
+  --color-glass-fill-dark: rgba(0, 0, 0, 0.60);
+  --color-glass-fill-light: rgba(255, 255, 255, 0.05);
+  --color-deep-teal: #006666;
+
+  /* ---------- 字体 ---------- */
+  --font-headline: 'Space Grotesk', sans-serif;
+  --font-body: 'Manrope', sans-serif;
+  --font-label: 'Inter', sans-serif;
+
+  /* ---------- 字号 ---------- */
+  --text-display-hero: 56px;
+  --text-display-hero--line-height: 64px;
+  --text-display-hero--letter-spacing: -0.02em;
+  --text-display-hero--font-weight: 700;
+
+  --text-headline-lg: 32px;
+  --text-headline-lg--line-height: 40px;
+  --text-headline-lg--font-weight: 600;
+
+  --text-headline-md: 24px;
+  --text-headline-md--line-height: 32px;
+  --text-headline-md--font-weight: 500;
+
+  --text-title-lg: 20px;
+  --text-title-lg--line-height: 28px;
+  --text-title-lg--font-weight: 600;
+
+  --text-body-lg: 18px;
+  --text-body-lg--line-height: 28px;
+  --text-body-lg--font-weight: 400;
+
+  --text-body-md: 16px;
+  --text-body-md--line-height: 24px;
+  --text-body-md--font-weight: 400;
+
+  --text-label-md: 14px;
+  --text-label-md--line-height: 20px;
+  --text-label-md--letter-spacing: 0.02em;
+  --text-label-md--font-weight: 500;
+
+  --text-label-sm-caps: 12px;
+  --text-label-sm-caps--line-height: 16px;
+  --text-label-sm-caps--letter-spacing: 0.05em;
+  --text-label-sm-caps--font-weight: 700;
+
+  /* ---------- 间距 ---------- */
+  --spacing-grid-minor: 5px;
+  --spacing-grid-major: 20px;
+  --spacing-margin-mobile: 16px;
+  --spacing-margin-desktop: 48px;
+  --spacing-container-gap: 32px;
+  --spacing-gutter: 24px;
+}
+
+/* ===== 全局基础样式（管理后台保持浅色） ===== */
+html, body {
+  font-family: var(--font-body);
+}
+
+/* 仅大屏入口激活深色科技风 */
+body.xmeco-dark {
+  background-color: var(--color-background);
+  color: var(--color-on-surface);
+}
+
+/* ===== 组件样式 ===== */
+
+/* 玻璃面板 */
+.glass-panel {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(1, 218, 243, 0.25);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2), inset 0 0 20px rgba(1, 218, 243, 0.05);
+}
+
+/* 发光脉冲 */
+.glow-pulse {
+  animation: pulse-glow 2.5s infinite ease-in-out;
+}
+@keyframes pulse-glow {
+  0%   { box-shadow: 0 0 10px rgba(1, 218, 243, 0.3), inset 0 0 10px rgba(1, 218, 243, 0.1); border-color: rgba(1, 218, 243, 0.4); }
+  50%  { box-shadow: 0 0 30px rgba(1, 218, 243, 0.8), inset 0 0 20px rgba(1, 218, 243, 0.4); border-color: rgba(1, 218, 243, 0.9); }
+  100% { box-shadow: 0 0 10px rgba(1, 218, 243, 0.3), inset 0 0 10px rgba(1, 218, 243, 0.1); border-color: rgba(1, 218, 243, 0.4); }
+}
+
+/* 浮动动画 */
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
+.float-delay-1 { animation-delay: 0.5s; }
+.float-delay-2 { animation-delay: 1.0s; }
+.float-delay-3 { animation-delay: 1.5s; }
+@keyframes float {
+  0%   { transform: translateY(0px); }
+  50%  { transform: translateY(-6px); }
+  100% { transform: translateY(0px); }
+}
+
+/* 流动线 */
+.flow-line {
+  stroke-dasharray: 10;
+  animation: flow 1s linear infinite;
+  filter: drop-shadow(0 0 6px rgba(1, 218, 243, 0.9));
+}
+@keyframes flow {
+  to { stroke-dashoffset: -20; }
+}
+
+/* 扫描线 */
+.scan-line {
+  background: linear-gradient(to bottom, transparent, rgba(0, 218, 243, 0.4), transparent);
+  height: 4px;
+  width: 100%;
+  position: absolute;
+  top: 0;
+  animation: scan 3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes scan {
+  0%   { top: -10%; opacity: 0; }
+  30%  { opacity: 1; }
+  100% { top: 110%; opacity: 0; }
+}
+
+/* 背景网格 */
+.bg-grid {
+  background-size: 20px 20px;
+  background-image:
+    linear-gradient(to right, rgba(1, 218, 243, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(1, 218, 243, 0.05) 1px, transparent 1px);
+}
+
+/* ===== Maintenance Center dark table ===== */
+.maintain-table .ant-table {
+  background: #0d1f3c !important;
+}
+.maintain-table .ant-table-thead > tr > th {
+  background: #0a1628 !important;
+  color: #8ba0c0 !important;
+  border-bottom: 1px solid #1a3455 !important;
+  font-size: 12px;
+}
+.maintain-table .ant-table-tbody > tr > td {
+  background: #0d1f3c !important;
+  color: #c0d0e0 !important;
+  border-bottom: 1px solid #1a3455 !important;
+  font-size: 12px;
+}
+.maintain-table .ant-table-tbody > tr:hover > td {
+  background: #152d50 !important;
+}
+.maintain-table .ant-pagination {
+  color: #8ba0c0 !important;
+}
+.maintain-table .ant-pagination-item {
+  background: #0a1628 !important;
+  border-color: #1a3455 !important;
+}
+.maintain-table .ant-pagination-item a {
+  color: #8ba0c0 !important;
+}
+.maintain-table .ant-pagination-item-active {
+  border-color: #00daf3 !important;
+}
+.maintain-table .ant-pagination-item-active a {
+  color: #00daf3 !important;
+}
