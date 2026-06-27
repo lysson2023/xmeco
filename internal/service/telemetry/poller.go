@@ -17,17 +17,16 @@ import (
 	"xmeco/internal/service/alarm"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Poller struct {
-	pool     *pgxpool.Pool
+	pool     postgres.DBTX
 	alarm    *alarm.Engine
 	regRepo  *postgres.RegisterRepo
 	propRepo *postgres.PropertyRepo
 }
 
-func NewPoller(pool *pgxpool.Pool) *Poller {
+func NewPoller(pool postgres.DBTX) *Poller {
 	return &Poller{
 		pool:     pool,
 		alarm:    alarm.New(pool),

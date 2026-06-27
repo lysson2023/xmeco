@@ -4,12 +4,15 @@ import {
   LogoutOutlined, UserOutlined, LockOutlined, ThunderboltOutlined,
   EnvironmentOutlined, ClockCircleOutlined, AlertOutlined,
   DashboardOutlined, DatabaseOutlined, ToolOutlined,
-  ScheduleOutlined, RocketOutlined, FileTextOutlined, BulbOutlined,
+  ScheduleOutlined, RocketOutlined, BulbOutlined,
   PlayCircleOutlined,
 } from '@ant-design/icons';
 import { api, setAuth, isTokenExpired } from '../api/screenClient';
 import DataCenter from './DataCenter';
 import MaintenanceCenter from './MaintenanceCenter';
+import ScreenTaskCenter from './ScreenTaskCenter';
+import ScreenDecisionCenter from './ScreenDecisionCenter';
+import ScreenEnergyCenter from './ScreenEnergyCenter';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { TOPO_ORDER, TOPO_COLORS, QUICK_MODES } from '../utils/constants';
 
@@ -28,7 +31,6 @@ const TABS = [
   { key: 'maintain', icon: <ToolOutlined />, label: '维保中心' },
   { key: 'task', icon: <ScheduleOutlined />, label: '任务中心' },
   { key: 'decision', icon: <RocketOutlined />, label: '决策中心' },
-  { key: 'logs', icon: <FileTextOutlined />, label: '系统日志' },
   { key: 'energy', icon: <BulbOutlined />, label: '能耗中心' },
 ];
 
@@ -238,6 +240,12 @@ export default function Screen() {
         <DataCenter key={`dc-${pid}-${bid}`} pid={pid} bid={bid} devices={data.devices || []} />
       ) : tab === 'maintain' ? (
         <MaintenanceCenter key={`mc-${pid}-${bid}`} pid={pid} bid={bid} devices={data.devices || []} />
+      ) : tab === 'task' ? (
+        <ScreenTaskCenter key={`tc-${bid}`} bid={bid} devices={data.devices || []} />
+      ) : tab === 'decision' ? (
+        <ScreenDecisionCenter key={`dec-${bid}`} bid={bid} devices={data.devices || []} />
+      ) : tab === 'energy' ? (
+        <ScreenEnergyCenter key={`ec-${bid}`} bid={bid} devices={data.devices || []} meterPower={data.meter_power || 0} />
       ) : tab === 'monitor' ? (
       <div style={{ display: 'flex', height: 'calc(100vh - 112px)' }}>
         {/* LEFT */}

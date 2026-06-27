@@ -12,25 +12,25 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"xmeco/internal/domain"
+	"xmeco/internal/repository/postgres"
 )
 
 const (
-	wttrNowURL    = "http://wttr.in/%s?format=j1"
+	wttrNowURL    = "https://wttr.in/%s?format=j1"
 	cacheDuration = 60 * time.Minute
 	httpTimeout   = 10 * time.Second
 )
 
 // Service 天气服务 — wttr.in (免费无需 Key) + DB 缓存
 type Service struct {
-	pool   *pgxpool.Pool
+	pool   postgres.DBTX
 	client *http.Client
 }
 
 // New creates a new weather service.
-func New(pool *pgxpool.Pool) *Service {
+func New(pool postgres.DBTX) *Service {
 	return &Service{
 		pool:   pool,
 		client: &http.Client{Timeout: httpTimeout},

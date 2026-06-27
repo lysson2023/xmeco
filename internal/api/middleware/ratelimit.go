@@ -16,6 +16,7 @@ type RateLimiter struct {
 	window       time.Duration // sliding window
 	trustProxy   bool          // only trust X-Forwarded-For / X-Real-IP when behind a trusted reverse proxy
 	trustedCIDRs []*net.IPNet  // allowed proxy CIDRs when trustProxy is true
+	stopCh       chan struct{} // closed by Shutdown to stop the cleanup goroutine
 }
 
 type bucket struct {
@@ -31,6 +32,7 @@ func NewRateLimiter(limit int, window time.Duration, trustedProxyCIDRs ...string
 		attempts: make(map[string]*bucket),
 		limit:    limit,
 		window:   window,
+		stopCh:   make(chan struct{}),
 	}
 	if len(trustedProxyCIDRs) > 0 {
 		rl.trustProxy = true
@@ -44,6 +46,17 @@ func NewRateLimiter(limit int, window time.Duration, trustedProxyCIDRs ...string
 	}
 	go rl.cleanup(5 * time.Minute)
 	return rl
+}
+
+// Shutdown stops the cleanup goroutine. Call once when the rate limiter is no
+// longer needed. Safe to call multiple times (idempotent).
+func (rl *RateLimiter) Shutdown() {
+	select {
+	case <-rl.stopCh:
+		// already closed
+	default:
+		close(rl.stopCh)
+	}
 }
 
 // LimitLogin returns a middleware that rate-limits login attempts per remote IP.
@@ -107,18 +120,22 @@ func (rl *RateLimiter) clientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-
 func (rl *RateLimiter) cleanup(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	for range ticker.C {
-		rl.mu.Lock()
-		now := time.Now()
-		for ip, b := range rl.attempts {
-			if now.After(b.resetAt) {
-				delete(rl.attempts, ip)
+	for {
+		select {
+		case <-rl.stopCh:
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for ip, b := range rl.attempts {
+				if now.After(b.resetAt) {
+					delete(rl.attempts, ip)
+				}
 			}
+			rl.mu.Unlock()
 		}
-		rl.mu.Unlock()
 	}
 }

@@ -6,21 +6,36 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"xmeco/internal/api/middleware"
+	"xmeco/internal/repository/postgres"
 	"xmeco/internal/service/orchestrator"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// boolDefault 解引用 *bool，nil 时返回默认值。
+func boolDefault(p *bool, defaultVal bool) bool {
+	if p == nil { return defaultVal }
+	return *p
+}
+
+// normalizeStep applies defaults for plan step fields (action fallback, retry count min, wait seconds min).
+func normalizeStep(action, planType string, retryCount, waitSeconds int) (string, int, int) {
+	if action == "" { action = planType }
+	if retryCount < 1 { retryCount = 1 }
+	if waitSeconds <= 0 { waitSeconds = 30 }
+	return action, retryCount, waitSeconds
+}
+
 type StartupHandler struct {
-	pool      *pgxpool.Pool
+	pool      postgres.DBTX
 	interlock *orchestrator.Interlock
 	dev       *DeviceHandler // enables real hardware dispatch for plan/scheduled control
 }
 
-func NewStartupHandler(pool *pgxpool.Pool) *StartupHandler {
+func NewStartupHandler(pool postgres.DBTX) *StartupHandler {
 	return &StartupHandler{pool: pool, interlock: orchestrator.NewInterlock(pool)}
 }
 
@@ -86,12 +101,7 @@ func (h *StartupHandler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(r.Context(), "INSERT INTO startup_plan (name,building_id,plan_type) VALUES($1,$2,$3) RETURNING id", body.Name, body.BuildingID, body.PlanType).Scan(&id)
 	if err != nil { serverErr(w, err); return }
 	for _, s := range body.Steps {
-		action := s.Action
-		if action == "" { action = body.PlanType }
-		rc := s.RetryCount
-		if rc < 1 { rc = 1 }
-		ws := s.WaitSeconds
-		if ws <= 0 { ws = 30 }
+		action, rc, ws := normalizeStep(s.Action, body.PlanType, s.RetryCount, s.WaitSeconds)
 		if _, err := tx.Exec(r.Context(), "INSERT INTO startup_step (plan_id,sort_order,device_id,property_id,action,target_value,wait_seconds,retry_count) VALUES($1,$2,$3,0,$4,'',$5,$6)", id, s.SortOrder, s.DeviceID, action, ws, rc); err != nil {
 			serverErr(w, err)
 			return
@@ -128,12 +138,7 @@ func (h *StartupHandler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, s := range body.Steps {
-		action := s.Action
-		if action == "" { action = body.PlanType }
-		rc := s.RetryCount
-		if rc < 1 { rc = 1 }
-		ws := s.WaitSeconds
-		if ws <= 0 { ws = 30 }
+		action, rc, ws := normalizeStep(s.Action, body.PlanType, s.RetryCount, s.WaitSeconds)
 		if _, err := tx.Exec(r.Context(), "INSERT INTO startup_step (plan_id,sort_order,device_id,property_id,action,target_value,wait_seconds,retry_count) VALUES($1,$2,$3,0,$4,'',$5,$6)", id, s.SortOrder, s.DeviceID, action, ws, rc); err != nil {
 			serverErr(w, err)
 			return
@@ -189,12 +194,19 @@ func (h *StartupHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Run in background — HTTP response returns immediately with execution ID.
-	// Use WithoutCancel to retain tracing values but not cancel on HTTP disconnect.
-	bgCtx := context.WithoutCancel(r.Context())
+	// WithoutCancel decouples from request lifecycle; WithTimeout prevents runaway
+	// goroutines when a step blocks (e.g. gateway transport stall).
+	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Minute)
 	go func() {
+		defer cancel()
 		defer func() {
 			if rec := recover(); rec != nil {
 				slog.Error("startup execution panic", "plan", plan.Name, "panic", rec)
+				// Mark execution as failed so it doesn't stay "running" forever.
+				if _, e := h.pool.Exec(context.Background(),
+					`UPDATE startup_execution SET status='failed',finished_at=NOW() WHERE id=$1`, exec.ID); e != nil {
+					slog.Warn("failed to mark execution as failed after panic", "exec", exec.ID, "err", e)
+				}
 			}
 		}()
 		exec.Run(bgCtx, steps, h.execDeviceControl)
@@ -230,9 +242,9 @@ func (h *StartupHandler) execDeviceControl(ctx context.Context, devID int, actio
 	controlVal, deviceStatus := controlActionCN(action)
 
 	_, err = h.pool.Exec(ctx, `
-		INSERT INTO control_record (project_name, building_name, device_name, prop_name, control_value, username, user_remark)
-		VALUES ($1, $2, $3, '启停编排', $4, 'orchestrator', $5)`,
-		projName, bldName, devName, controlVal, action)
+		INSERT INTO control_record (project_name, building_name, device_name, device_id, prop_name, control_value, username, user_remark)
+		VALUES ($1, $2, $3, $4, '启停编排', $5, 'orchestrator', $6)`,
+		projName, bldName, devName, devID, controlVal, action)
 	if err != nil {
 		return "", fmt.Errorf("写控制记录失败: %w", err)
 	}
@@ -393,7 +405,7 @@ func (h *StartupHandler) CreateScheduledTask(w http.ResponseWriter, r *http.Requ
 	err := h.pool.QueryRow(r.Context(),
 		`INSERT INTO scheduled_task (name,building_id,device_id,action_type,target_value,schedule_type,schedule_time,days_of_week,enabled)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7::time,$8,$9) RETURNING id`,
-		t.Name, t.BuildingID, t.DeviceID, t.ActionType, t.TargetValue, t.ScheduleType, t.ScheduleTime, t.DaysOfWeek, boolVal(t.Enabled, true),
+		t.Name, t.BuildingID, t.DeviceID, t.ActionType, t.TargetValue, t.ScheduleType, t.ScheduleTime, t.DaysOfWeek, boolDefault(t.Enabled, true),
 	).Scan(&t.ID)
 	if err != nil { serverErr(w, err); return }
 	created(w, t)
@@ -428,7 +440,7 @@ func (h *StartupHandler) UpdateScheduledTask(w http.ResponseWriter, r *http.Requ
 
 	_, err = h.pool.Exec(r.Context(),
 		`UPDATE scheduled_task SET name=$1,device_id=$2,action_type=$3,target_value=$4,schedule_type=$5,schedule_time=$6::time,days_of_week=$7,enabled=$8 WHERE id=$9`,
-		cur.Name, cur.DeviceID, cur.ActionType, cur.TargetValue, cur.ScheduleType, cur.ScheduleTime, cur.DaysOfWeek, boolVal(cur.Enabled, true), t.ID)
+		cur.Name, cur.DeviceID, cur.ActionType, cur.TargetValue, cur.ScheduleType, cur.ScheduleTime, cur.DaysOfWeek, boolDefault(cur.Enabled, true), t.ID)
 	if err != nil { serverErr(w, err); return }
 	ok(w, M{"status":"updated"})
 }
@@ -469,62 +481,44 @@ func (h *StartupHandler) RunDueScheduledTasks(ctx context.Context) {
 			slog.Warn("RunDueScheduledTasks scan failed", "err", err)
 			continue
 		}
-		// Execute the action via gateway
-		if err := h.executeAction(ctx, devID, action, targetVal); err != nil {
-			if _, e := h.pool.Exec(ctx, `UPDATE scheduled_task SET last_result='failed', last_run_at=NOW() WHERE id=$1`, id); e != nil {
-				slog.Warn("scheduled task result update failed", "id", id, "err", e)
-			}
+		// Execute the action via gateway (with per-task timeout to avoid
+		// a hung gateway from blocking all subsequent tasks).
+		taskCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := h.executeAction(taskCtx, devID, action, targetVal)
+		cancel()
+		result := "success"
+		if err != nil {
+			result = "failed"
 			slog.Warn("scheduled task failed", "id", id, "err", err)
 		} else {
-			if _, e := h.pool.Exec(ctx, `UPDATE scheduled_task SET last_result='success', last_run_at=NOW() WHERE id=$1`, id); e != nil {
-				slog.Warn("scheduled task result update failed", "id", id, "err", e)
-			}
 			slog.Info("scheduled task completed", "id", id, "device", devID, "action", action)
+		}
+		if _, e := h.pool.Exec(ctx, `UPDATE scheduled_task SET last_result=$1, last_run_at=NOW() WHERE id=$2`, result, id); e != nil {
+			slog.Warn("scheduled task result update failed", "id", id, "err", e)
 		}
 	}
 }
 
 func (h *StartupHandler) executeAction(ctx context.Context, devID int, action string, targetVal *string) error {
-	switch action {
-	case "startup":
-		_, err := h.pool.Exec(ctx,
-			`INSERT INTO control_record (project_name,building_name,device_name,prop_name,control_value,username,created_at)
-			 SELECT COALESCE(p.name,''), COALESCE(b.name,''), COALESCE(d.name,''), '开机', '1', '定时任务', NOW()
-			 FROM device d LEFT JOIN building b ON b.id=d.building_id LEFT JOIN project p ON p.id=b.project_id
-			 WHERE d.id=$1`, devID)
-		if err == nil {
-			h.dispatchControl(ctx, devID, "startup")
-			if _, e := h.pool.Exec(ctx, `UPDATE device SET device_status='开机' WHERE id=$1`, devID); e != nil {
-				slog.Warn("scheduled task update status failed", "dev", devID, "err", e)
-			}
-		}
-		return err
-	case "shutdown":
-		_, err := h.pool.Exec(ctx,
-			`INSERT INTO control_record (project_name,building_name,device_name,prop_name,control_value,username,created_at)
-			 SELECT COALESCE(p.name,''), COALESCE(b.name,''), COALESCE(d.name,''), '关机', '0', '定时任务', NOW()
-			 FROM device d LEFT JOIN building b ON b.id=d.building_id LEFT JOIN project p ON p.id=b.project_id
-			 WHERE d.id=$1`, devID)
-		if err == nil {
-			h.dispatchControl(ctx, devID, "shutdown")
-			if _, e := h.pool.Exec(ctx, `UPDATE device SET device_status='关机' WHERE id=$1`, devID); e != nil {
-				slog.Warn("scheduled task update status failed", "dev", devID, "err", e)
-			}
-		}
-		return err
-	default:
-		val := ""
-		if targetVal != nil { val = *targetVal }
-		_, err := h.pool.Exec(ctx,
-			`INSERT INTO control_record (project_name,building_name,device_name,prop_name,control_value,username,created_at)
-			 SELECT COALESCE(p.name,''), COALESCE(b.name,''), COALESCE(d.name,''), $2, $3, '定时任务', NOW()
-			 FROM device d LEFT JOIN building b ON b.id=d.building_id LEFT JOIN project p ON p.id=b.project_id
-			 WHERE d.id=$1`, devID, action, val)
-		if err == nil {
-			h.dispatchControl(ctx, devID, action)
-		}
-		return err
+	controlVal, deviceStatus := controlActionCN(action)
+	remark := action
+	if targetVal != nil && *targetVal != "" {
+		remark = action + ":" + *targetVal
 	}
+	_, err := h.pool.Exec(ctx,
+		`INSERT INTO control_record (project_name,building_name,device_name,device_id,prop_name,control_value,username,user_remark,created_at)
+		 SELECT COALESCE(p.name,''), COALESCE(b.name,''), COALESCE(d.name,''), d.id, '定时任务', $2, '定时任务', $3, NOW()
+		 FROM device d LEFT JOIN building b ON b.id=d.building_id LEFT JOIN project p ON p.id=b.project_id
+		 WHERE d.id=$1`, devID, controlVal, remark)
+	if err == nil {
+		h.dispatchControl(ctx, devID, action)
+		if deviceStatus != "" {
+			if _, e := h.pool.Exec(ctx, `UPDATE device SET device_status=$1 WHERE id=$2`, deviceStatus, devID); e != nil {
+				slog.Warn("scheduled task update status failed", "dev", devID, "err", e)
+			}
+		}
+	}
+	return err
 }
 
 // dispatchControl forwards a control action to the physical device via the gateway.

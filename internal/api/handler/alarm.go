@@ -7,13 +7,13 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"xmeco/internal/api/middleware"
+	"xmeco/internal/repository/postgres"
 )
 
-type AlarmHandler struct{ pool *pgxpool.Pool }
-func NewAlarmHandler(pool *pgxpool.Pool) *AlarmHandler { return &AlarmHandler{pool} }
+type AlarmHandler struct{ pool postgres.DBTX }
+func NewAlarmHandler(pool postgres.DBTX) *AlarmHandler { return &AlarmHandler{pool} }
 
 func (h *AlarmHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 	deviceID := queryInt(r, "device_id")
@@ -101,9 +101,13 @@ func (h *AlarmHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
 		return
 	}
+	enabled := true
+	if rr.Enabled != nil {
+		enabled = *rr.Enabled
+	}
 	_, err := h.pool.Exec(r.Context(),
 		"UPDATE alarm_rule SET name=$1,device_id=$2,property_id=$3,device_type=$4,metric=$5,condition=$6,threshold=$7,level=$8,target_value=$9,min_value=$10,max_value=$11,notify_users=$12,enabled=$13 WHERE id=$14",
-		rr.Name, rr.DeviceID, rr.PropertyID, rr.DeviceType, rr.Metric, rr.Condition, rr.Threshold, rr.Level, rr.TargetValue, rr.MinValue, rr.MaxValue, rr.NotifyUsers, rr.Enabled, id)
+		rr.Name, rr.DeviceID, rr.PropertyID, rr.DeviceType, rr.Metric, rr.Condition, rr.Threshold, rr.Level, rr.TargetValue, rr.MinValue, rr.MaxValue, rr.NotifyUsers, enabled, id)
 	if err != nil { serverErr(w, err); return }
 	ok(w, M{"status": "updated"})
 }

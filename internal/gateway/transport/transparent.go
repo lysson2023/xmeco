@@ -51,10 +51,11 @@ func (t *TransparentTransport) SendAndReceive(data []byte) ([]byte, error) {
 	}
 
 	// Drain any stale bytes BEFORE sending (previous failed read leftovers).
-	// Limit to max 10 iterations to prevent infinite loops on noisy connections.
-	t.conn.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
+	// Use a single deadline to bound total drain time instead of resetting per
+	// iteration (avoids unbounded drain on a trickle-feed connection).
+	t.conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
 	junk := make([]byte, 1024)
-	for i := 0; i < 10; i++ {
+	for {
 		_, err := t.conn.Read(junk)
 		if err != nil { break }
 	}

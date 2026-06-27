@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+
+	"xmeco/internal/repository/postgres"
 )
 
-type MaintenanceHandler struct{ pool *pgxpool.Pool }
+type MaintenanceHandler struct{ pool postgres.DBTX }
 
-func NewMaintenanceHandler(pool *pgxpool.Pool) *MaintenanceHandler {
+func NewMaintenanceHandler(pool postgres.DBTX) *MaintenanceHandler {
 	return &MaintenanceHandler{pool}
 }
 

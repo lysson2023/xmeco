@@ -10,13 +10,15 @@ import (
 
 // DBTX is a database handle interface satisfied by both *pgxpool.Pool (production)
 // and pgxmock.PgxPoolIface (testing). It exposes only the methods used by repositories.
+// Close() is intentionally excluded — connection-pool lifecycle management is the
+// caller's responsibility and should use the concrete *pgxpool.Pool type.
 type DBTX interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	Begin(ctx context.Context) (pgx.Tx, error)
+	SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults
 	Ping(ctx context.Context) error
-	Close()
 }
 
 // Compile-time check: *pgxpool.Pool satisfies DBTX.

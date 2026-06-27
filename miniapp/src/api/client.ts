@@ -34,18 +34,24 @@ function handle401() {
   }
 }
 
-async function request(url: string, method: HttpMethod, data?: any): Promise<any> {
+async function request(url: string, method: HttpMethod, data?: any, skipAuth?: boolean): Promise<any> {
   try {
+    const header: Record<string, string> = {}
+    if (!skipAuth) {
+      header.Authorization = 'Bearer ' + getToken()
+    }
     const r = await uni.request({
       url,
       method,
       data,
       timeout: REQUEST_TIMEOUT,
-      header: { Authorization: 'Bearer ' + getToken() },
+      header,
     })
     if (r.statusCode === 401) {
-      handle401()
-      throw new AuthError('登录已过期')
+      if (!skipAuth) {
+        handle401()
+      }
+      throw new AuthError(skipAuth ? '用户名或密码错误' : '登录已过期')
     }
     if (r.statusCode && r.statusCode >= 400) {
       const msg = (r.data as any)?.error || (r.data as any)?.message || '请求失败'
@@ -78,18 +84,8 @@ export function clearToken() {
 
 export const api = {
   async login(u: string, p: string) {
-    const r = await uni.request({
-      url: BASE + '/auth/login',
-      method: 'POST',
-      data: { username: u, password: p },
-      timeout: REQUEST_TIMEOUT,
-    })
-    if (r.statusCode === 401) {
-      throw new Error('用户名或密码错误')
-    }
-    if (r.statusCode && r.statusCode >= 400) {
-      throw new Error((r.data as any)?.error || '登录失败')
-    }
+    // request() 统一处理 401/4xx/5xx，skipAuth=true 表示登录页不需要全局登出跳转
+    const r = await request(BASE + '/auth/login', 'POST', { username: u, password: p }, true)
     const d = r.data as any
     token = d.token
     uni.setStorageSync('token', token)

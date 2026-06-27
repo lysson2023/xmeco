@@ -99,10 +99,10 @@ func TestWttrParseInvalidJSON(t *testing.T) {
 
 func TestBuildWttrURL(t *testing.T) {
 	// Verify URL construction pattern
-	expected := "http://wttr.in/%E5%8C%97%E4%BA%AC?format=j1"
+	expected := "https://wttr.in/%E5%8C%97%E4%BA%AC?format=j1"
 	// The constant wttrNowURL uses fmt.Sprintf
 	// Just verify the format string is correct
-	if wttrNowURL != "http://wttr.in/%s?format=j1" {
+	if wttrNowURL != "https://wttr.in/%s?format=j1" {
 		t.Errorf("unexpected URL pattern: %s", wttrNowURL)
 	}
 	// Verify expected URL uses proper encoding
@@ -115,6 +115,139 @@ func TestCacheDuration(t *testing.T) {
 	// Verify cache duration is reasonable
 	if cacheDuration.Minutes() < 10 || cacheDuration.Minutes() > 120 {
 		t.Errorf("cache duration %.0f min, expected 10-120 min", cacheDuration.Minutes())
+	}
+}
+
+// =============================================================================
+// Tier 3 — W-10~W-13: translateWeather 中文翻译
+// =============================================================================
+
+func TestTranslateWeather(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		code string
+		want string
+	}{
+		{
+			name: "W-10 精确文本匹配Clear→晴",
+			text: "Clear",
+			code: "",
+			want: "晴",
+		},
+		{
+			name: "W-10 精确文本匹配Sunny→晴",
+			text: "Sunny",
+			code: "",
+			want: "晴",
+		},
+		{
+			name: "W-11 代码匹配113→晴",
+			text: "",
+			code: "113",
+			want: "晴",
+		},
+		{
+			name: "W-11 代码匹配116→多云",
+			text: "unknown-text",
+			code: "116",
+			want: "多云",
+		},
+		{
+			name: "code 302精确匹配中雨(映射表优先)",
+			text: "unknown-code",
+			code: "302",
+			want: "中雨", // weatherCodeCN["302"] = "中雨"
+		},
+		{
+			name: "W-12 前缀回退3xx→阵雨(无精确code)",
+			text: "",
+			code: "303", // 不在 weatherCodeCN 中，走前缀 3→"阵雨"
+			want: "阵雨",
+		},
+		{
+			name: "W-12 前缀回退1xx→晴间多云(无精确code)",
+			text: "",
+			code: "199", // 不在 weatherCodeCN 中，走前缀 1→"晴间多云"
+			want: "晴间多云",
+		},
+		{
+			name: "W-13 全部不匹配默认多云",
+			text: "UnknownXxx",
+			code: "999",
+			want: "多云",
+		},
+		{
+			name: "W-13 空输入默认多云",
+			text: "",
+			code: "",
+			want: "多云",
+		},
+		{
+			name: "文本含前后空格被Trim",
+			text: "  Clear  ",
+			code: "",
+			want: "晴",
+		},
+		{
+			name: "Thunderstorm→雷暴",
+			text: "Thunderstorm",
+			code: "",
+			want: "雷暴",
+		},
+		{
+			name: "Heavy rain→大雨",
+			text: "Heavy rain",
+			code: "",
+			want: "大雨",
+		},
+		{
+			name: "文本优先于代码",
+			text: "Sunny",
+			code: "302",
+			want: "晴", // text match takes precedence over code
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := translateWeather(tt.text, tt.code)
+			if got != tt.want {
+				t.Errorf("translateWeather(%q, %q) = %q, want %q", tt.text, tt.code, got, tt.want)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Tier 3 — translateWindDir 风向翻译
+// =============================================================================
+
+func TestTranslateWindDir(t *testing.T) {
+	tests := []struct {
+		name string
+		dir  string
+		want string
+	}{
+		{"北风N", "N", "北"},
+		{"东北NE", "NE", "东北"},
+		{"东南SE", "SE", "东南"},
+		{"南风S", "S", "南"},
+		{"西南SW", "SW", "西南"},
+		{"西北NW", "NW", "西北"},
+		{"未知方向原样返回", "XYZ", "XYZ"},
+		{"空字符串返回空", "", ""},
+		{"16方向NNE", "NNE", "北东北"},
+		{"16方向WSW", "WSW", "西西南"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := translateWindDir(tt.dir)
+			if got != tt.want {
+				t.Errorf("translateWindDir(%q) = %q, want %q", tt.dir, got, tt.want)
+			}
+		})
 	}
 }
 

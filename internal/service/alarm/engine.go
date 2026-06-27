@@ -6,12 +6,12 @@ import (
 	"log/slog"
 	"strconv"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"xmeco/internal/repository/postgres"
 )
 
-type Engine struct{ pool *pgxpool.Pool }
+type Engine struct{ pool postgres.DBTX }
 
-func New(pool *pgxpool.Pool) *Engine { return &Engine{pool} }
+func New(pool postgres.DBTX) *Engine { return &Engine{pool} }
 
 func (e *Engine) Evaluate(ctx context.Context, deviceID int, deviceName, deviceType, metric string, value float64) error {
 	rows, err := e.pool.Query(ctx,

@@ -169,6 +169,7 @@ func (s *Service) fetchLatestPowerMap(ctx context.Context) map[int]float64 {
 		 WHERE metric LIKE $1
 		 ORDER BY device_id, ts DESC`, "%功率%")
 	if err != nil {
+		slog.Warn("fetchLatestPowerMap query failed", "err", err)
 		return nil
 	}
 	defer rows.Close()

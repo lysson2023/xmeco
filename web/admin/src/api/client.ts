@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { isTokenExpired } from '../utils/auth';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE || '/api/v1',
@@ -8,6 +9,12 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
+    if (isTokenExpired(token)) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.dispatchEvent(new CustomEvent('auth-expired'));
+      return Promise.reject(new Error('Token expired'));
+    }
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;

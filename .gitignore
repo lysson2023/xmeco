@@ -6,6 +6,7 @@ miniapp/node_modules/
 *.exe
 *.exe~
 web/admin/dist/
+web/admin/screen-src/dist/
 web/dashboard/dist/
 
 # IDE

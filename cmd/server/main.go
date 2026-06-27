@@ -10,8 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"xmeco/internal/api/handler"
 	"xmeco/internal/api/middleware"
 	"xmeco/internal/config"
@@ -75,6 +73,12 @@ func main() {
 	// ---- gateway & telemetry ----
 	ctxGW, cancelGW := context.WithCancel(context.Background())
 	defer cancelGW()
+
+	// Background context for retention/offline/scheduler goroutines.
+	// Cancelled first during graceful shutdown before gateways are torn down.
+	ctxBg, cancelBg := context.WithCancel(context.Background())
+	defer cancelBg()
+
 	poller := telemetry.NewPoller(pool)
 	gwMgr := gateway.NewManager(poller.PollDevice, loadDevicesForGateway(pool), pool)
 	dh.SetGwMgr(gwMgr)    // enable device control via gateway
@@ -87,46 +91,61 @@ func main() {
 	gwMgr.StartDTUListener(ctxGW, ":502")
 
 	// ---- data retention + offline detection + scheduled tasks (panic recovery + immediate first run) ----
-	safeGo := func(name string, fn func()) {
+	safeGo := func(name string, fn func(ctx context.Context)) {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					slog.Error("goroutine panic recovered", "name", name, "panic", r)
 				}
 			}()
-			fn()
+			fn(ctxBg)
 		}()
 	}
 
 	if cfg.RetentionDays > 0 {
-		safeGo("retention", func() {
-			runRetention(pool, cfg.RetentionDays) // immediate first run
+		safeGo("retention", func(ctx context.Context) {
+			runRetention(ctx, pool, cfg.RetentionDays) // immediate first run
 			ticker := time.NewTicker(24 * time.Hour)
 			defer ticker.Stop()
-			for range ticker.C {
-				runRetention(pool, cfg.RetentionDays)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					runRetention(ctx, pool, cfg.RetentionDays)
+				}
 			}
 		})
 		slog.Info("data retention enabled", "days", cfg.RetentionDays)
 	}
 
 	// ---- offline detection: mark devices offline after 10 min, create alarm log ----
-	safeGo("offline", func() {
+	safeGo("offline", func(ctx context.Context) {
 		alarmEngine := alarm.New(pool)
-		runOfflineCheck(pool, alarmEngine) // immediate first run
+		runOfflineCheck(ctx, pool, alarmEngine) // immediate first run
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			runOfflineCheck(pool, alarmEngine)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runOfflineCheck(ctx, pool, alarmEngine)
+			}
 		}
 	})
 
 	// ---- scheduled task runner ----
-	safeGo("scheduler", func() {
+	safeGo("scheduler", func(ctx context.Context) {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			sh.RunDueScheduledTasks(context.Background())
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				sh.RunDueScheduledTasks(ctx)
+			}
 		}
 	})
 
@@ -147,13 +166,16 @@ func main() {
 		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 		<-quit
 		slog.Info("shutting down...")
-		// 1. Stop gateway listeners and disconnect all gateways first
+		// 1. Cancel background goroutines first (retention, offline, scheduler)
+		cancelBg()
+		// 2. Stop gateway listeners and disconnect all gateways
 		cancelGW()
 		gwMgr.Shutdown()
-		// 2. Then gracefully shut down HTTP server
+		// 3. Then gracefully shut down HTTP server
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srv.Shutdown(ctx)
+		rateLimiter.Shutdown()
 	}()
 
 	slog.Info("XMECO running", "http", addr, "customGW", ":8081", "dtuGW", ":502")
@@ -305,19 +327,25 @@ func registerRoutes(
 	return mux
 }
 
+// 后台任务常量
+const (
+	retentionBatchSize = 10000             // 数据清理每批次最大行数
+	offlineIntervalSQL = "'10 minutes'"    // PostgreSQL interval 格式，设备离线判定阈值
+)
+
 // withPerm wraps a handler with RBAC permission check.
 func withPerm(authSvc *auth.Service, permCode string, next http.HandlerFunc) http.HandlerFunc {
 	handler := middleware.RequirePermission(authSvc, permCode)(next)
 	return func(w http.ResponseWriter, r *http.Request) { handler.ServeHTTP(w, r) }
 }
 
-// runRetention deletes telemetry data older than retentionDays in 10000-row chunks.
-func runRetention(pool *pgxpool.Pool, retentionDays int) {
+// runRetention deletes telemetry data older than retentionDays in batches.
+func runRetention(ctx context.Context, pool postgres.DBTX, retentionDays int) {
 	cutoff := time.Now().AddDate(0, 0, -retentionDays)
 	for {
-		ct, err := pool.Exec(context.Background(),
-			`DELETE FROM device_telemetry WHERE ts < $1 AND ctid IN (SELECT ctid FROM device_telemetry WHERE ts < $1 LIMIT 10000)`,
-			cutoff)
+		ct, err := pool.Exec(ctx,
+			`DELETE FROM device_telemetry WHERE ts < $1 AND ctid IN (SELECT ctid FROM device_telemetry WHERE ts < $1 LIMIT $2)`,
+			cutoff, retentionBatchSize)
 		if err != nil {
 			slog.Warn("data retention cleanup failed", "err", err)
 			return
@@ -330,10 +358,10 @@ func runRetention(pool *pgxpool.Pool, retentionDays int) {
 }
 
 // runOfflineCheck marks devices offline and creates alarm logs after 10 min of silence.
-func runOfflineCheck(pool *pgxpool.Pool, alarmEngine *alarm.Engine) {
-	rows, err := pool.Query(context.Background(),
+func runOfflineCheck(ctx context.Context, pool postgres.DBTX, alarmEngine *alarm.Engine) {
+	rows, err := pool.Query(ctx,
 		`SELECT id, COALESCE(name,'') FROM device
-		 WHERE online_status='在线' AND last_online_at < NOW() - INTERVAL '10 minutes'`)
+		 WHERE online_status='在线' AND last_online_at < NOW() - `+offlineIntervalSQL)
 	if err != nil {
 		slog.Warn("offline detection query failed", "err", err)
 		return
@@ -345,20 +373,20 @@ func runOfflineCheck(pool *pgxpool.Pool, alarmEngine *alarm.Engine) {
 		if err := rows.Scan(&id, &name); err != nil {
 			continue
 		}
-		if err := alarmEngine.AlertOffline(context.Background(), id, name); err != nil {
+		if err := alarmEngine.AlertOffline(ctx, id, name); err != nil {
 			slog.Warn("offline alarm create failed", "dev", id, "err", err)
 		}
 	}
-	if _, err := pool.Exec(context.Background(),
+	if _, err := pool.Exec(ctx,
 		`UPDATE device SET online_status='离线'
-		 WHERE online_status='在线' AND last_online_at < NOW() - INTERVAL '10 minutes'`); err != nil {
+		 WHERE online_status='在线' AND last_online_at < NOW() - `+offlineIntervalSQL); err != nil {
 		slog.Warn("offline status update failed", "err", err)
 	}
 }
 
 // loadDevicesForGateway returns a DeviceLoaderFn that queries the DB for
 // devices whose gateway_imei matches the gateway ID.
-func loadDevicesForGateway(pool *pgxpool.Pool) gateway.DeviceLoaderFn {
+func loadDevicesForGateway(pool postgres.DBTX) gateway.DeviceLoaderFn {
 	return func(ctx context.Context, gwID string) ([]gateway.DeviceRef, error) {
 		rows, err := pool.Query(ctx,
 			`SELECT id, device_no, device_type, COALESCE(name,''), node_address

@@ -16,6 +16,7 @@ import Agents from './pages/Agents';
 import Permissions from './pages/Permissions';
 import MultiAgent from './pages/MultiAgent';
 import MaintenanceRecords from './pages/MaintenanceRecords';
+import TaskCenter from './pages/TaskCenter';
 import Dashboard from './pages/Dashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -37,6 +38,7 @@ function App() {
               <Route path="alarms" element={<Alarms />} />
               <Route path="logs" element={<Logs />} />
               <Route path="startup-plans" element={<StartupPlans />} />
+              <Route path="task-center" element={<TaskCenter />} />
               <Route path="maintenance-records" element={<MaintenanceRecords />} />
               <Route path="users" element={<Users />} />
               <Route path="agents" element={<Agents />} />

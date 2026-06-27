@@ -2,29 +2,23 @@ package intelligence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-)
 
-// dbPool abstracts the pgxpool methods used by intelligence services.
-// Both *pgxpool.Pool and pgxmock.PgxPoolIface satisfy this interface.
-type dbPool interface {
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-	Begin(ctx context.Context) (pgx.Tx, error)
-}
+	"xmeco/internal/repository/postgres"
+)
 
 // Service bundles all intelligence analysis capabilities.
 type Service struct {
-	pool dbPool
+	pool postgres.DBTX
 }
 
 // New creates a new intelligence service.
-func New(pool *pgxpool.Pool) *Service {
+func New(pool postgres.DBTX) *Service {
 	return &Service{pool: pool}
 }
 
@@ -85,6 +79,9 @@ func (s *Service) GetWeatherTemp(ctx context.Context) (float64, error) {
 		`SELECT COALESCE(temp::numeric, 25.0) FROM weather_cache ORDER BY fetched_at DESC LIMIT 1`).
 		Scan(&temp)
 	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("GetWeatherTemp query failed, using default", "err", err)
+		}
 		return 25.0, nil // default 25°C
 	}
 	return temp, nil

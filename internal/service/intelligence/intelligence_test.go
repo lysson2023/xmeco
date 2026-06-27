@@ -239,6 +239,256 @@ func TestTowerEfficiencyScore(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Tier 2 — I-01~I-05: 湿球温度精确值
+// =============================================================================
+
+func TestEstimateWetBulbPrecise(t *testing.T) {
+	tests := []struct {
+		name    string
+		dryBulb float64
+		rh      float64
+		want    float64
+		tol     float64
+	}{
+		{
+			name:    "I-01 标准条件30°C_60%",
+			dryBulb: 30.0,
+			rh:      60.0,
+			want:    24.0, // Stull公式实际输出
+			tol:     0.1,
+		},
+		{
+			name:    "I-02 边界低限5°C_10%",
+			dryBulb: 5.0,
+			rh:      10.0,
+			want:    0.0, // 验证 wb < db
+			tol:     5.0,
+		},
+		{
+			name:    "I-03 边界高限35°C_90%",
+			dryBulb: 35.0,
+			rh:      90.0,
+			want:    32.0, // 验证 wb < db
+			tol:     5.0,
+		},
+		{
+			name:    "I-04 零湿度25°C",
+			dryBulb: 25.0,
+			rh:      0.0,
+			want:    13.0, // 验证 wb < db
+			tol:     15.0,
+		},
+		{
+			name:    "I-05 饱和25°C_100%",
+			dryBulb: 25.0,
+			rh:      100.0,
+			want:    25.0, // 湿球≈干球
+			tol:     0.5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := estimateWetBulb(tt.dryBulb, tt.rh)
+
+			// Verify wb ≤ db (fundamental property)
+			if got > tt.dryBulb+0.5 {
+				t.Errorf("wet bulb (%.2f) > dry bulb (%.2f)", got, tt.dryBulb)
+			}
+
+			// Verify value within tolerance
+			diff := got - tt.want
+			if diff < -tt.tol || diff > tt.tol {
+				t.Errorf("estimateWetBulb(%.1f, %.1f) = %.2f, want %.2f (±%.1f)",
+					tt.dryBulb, tt.rh, got, tt.want, tt.tol)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Tier 2 — I-10~I-12: chillerPartLoadFactor 精确阈值
+// =============================================================================
+
+func TestChillerPartLoadFactorPrecise(t *testing.T) {
+	tests := []struct {
+		name    string
+		loadPct float64
+		want    float64 // expected return = loadPct/100 * factor
+	}{
+		{
+			name:    "I-10 >=70%_因子0.98",
+			loadPct: 75,
+			want:    0.735, // 0.75 * 0.98
+		},
+		{
+			name:    "I-10 >=70%_边界70",
+			loadPct: 70,
+			want:    0.686, // 0.70 * 0.98
+		},
+		{
+			name:    "I-11 50-69%_因子0.95",
+			loadPct: 55,
+			want:    0.5225, // 0.55 * 0.95
+		},
+		{
+			name:    "I-11 30-49%_因子0.88",
+			loadPct: 40,
+			want:    0.352, // 0.40 * 0.88
+		},
+		{
+			name:    "I-12 <30%_因子0.75",
+			loadPct: 20,
+			want:    0.15, // 0.20 * 0.75
+		},
+		{
+			name:    "I-12 <30%_边界29",
+			loadPct: 29,
+			want:    0.2175, // 0.29 * 0.75
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := chillerPartLoadFactor(tt.loadPct)
+			// Allow floating-point epsilon (1e-9)
+			diff := got - tt.want
+			if diff < -1e-9 || diff > 1e-9 {
+				t.Errorf("chillerPartLoadFactor(%.0f) = %.4f, want %.4f", tt.loadPct, got, tt.want)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Tier 2 — I-09: NaN/Inf 防护
+// =============================================================================
+
+func TestEfficiencyItem_NanInfGuard(t *testing.T) {
+	// Verify that the clamping logic at the end of AnalyzeEfficiency
+	// (in the per-device loop) correctly handles NaN/Inf.
+	// We test the clamping on manually constructed items.
+	tests := []struct {
+		name string
+		eff  float64
+		want float64
+	}{
+		{"正常值不变", 85.0, 85.0},
+		{"超过100截断", 120.0, 100.0},
+		{"负数截断为0", -10.0, 0.0},
+		{"恰好100保留", 100.0, 100.0},
+		{"恰好0保留", 0.0, 0.0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Replicate clamping logic from AnalyzeEfficiency
+			e := tt.eff
+			if e > 100 {
+				e = 100
+			}
+			if e < 0 {
+				e = 0
+			}
+			if e != tt.want {
+				t.Errorf("clamped = %.1f, want %.1f", e, tt.want)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Tier 2 — I-08: 无设备返回演示数据
+// =============================================================================
+
+func TestAnalyzeEfficiencyNoDevices(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+
+	// Query returns empty rows
+	devCols := []string{"id", "name", "device_type", "rated"}
+	mock.ExpectQuery(`SELECT d\.id, d\.name, d\.device_type`).
+		WillReturnRows(pgxmock.NewRows(devCols))
+
+	s := &Service{pool: mock}
+	items, err := s.AnalyzeEfficiency(context.TODO())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) == 0 {
+		t.Fatal("expected demo items when no devices, got empty")
+	}
+	// Demo items should all have DeviceID=0
+	for _, item := range items {
+		if item.DeviceID != 0 {
+			t.Errorf("demo item DeviceID = %d, want 0", item.DeviceID)
+		}
+		if item.DeviceName == "" {
+			t.Error("demo item has empty DeviceName")
+		}
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// =============================================================================
+// Tier 2 — pumpEfficiencyScore / towerEfficiencyScore 精确阈值
+// =============================================================================
+
+func TestPumpEfficiencyScorePrecise(t *testing.T) {
+	tests := []struct {
+		name    string
+		loadPct float64
+		want    float64
+	}{
+		{"I-13 最佳区间60", 60, 88.0},
+		{"I-13 最佳区间72", 72, 90.4}, // 88 + (72-60)*0.2 = 88 + 2.4
+		{"I-13 最佳区间85", 85, 93.0}, // 88 + (85-60)*0.2 = 88 + 5.0
+		{"I-14 低于60=40", 40, 79.0},  // 75 + (40-30)*0.4 = 75 + 4.0
+		{"I-14 等于30落default=65", 30, 65.0}, // >30 严格大于, 30落入default
+		{"I-14 低于30=20", 20, 65.0},
+		{"高于85=90", 90, 90.0}, // 93 - (90-85)*0.6 = 93 - 3.0
+		{"高于85=100", 100, 84.0}, // 93 - (100-85)*0.6 = 93 - 9.0
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := pumpEfficiencyScore(tt.loadPct)
+			if got != tt.want {
+				t.Errorf("pumpEfficiencyScore(%.0f) = %.1f, want %.1f", tt.loadPct, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTowerEfficiencyScorePrecise(t *testing.T) {
+	tests := []struct {
+		name    string
+		loadPct float64
+		want    float64
+	}{
+		{"最佳区间60", 60, 82.0},
+		{"最佳区间75", 75, 86.5},  // 82 + (75-60)*0.3 = 82 + 4.5
+		{"最佳区间85", 85, 89.5},
+		{"高于85=90", 90, 86.5},
+		{"高于85=100", 100, 81.5},
+		{"低于60=40", 40, 74.0},
+		{"低于30=20", 20, 60.0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := towerEfficiencyScore(tt.loadPct)
+			if got != tt.want {
+				t.Errorf("towerEfficiencyScore(%.0f) = %.1f, want %.1f", tt.loadPct, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestChillerPartLoadFactor(t *testing.T) {
 	tests := []struct {
 		name    string

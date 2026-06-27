@@ -125,6 +125,53 @@ func TestValidateTokenMalformed(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Tier 3 — A-08~A-09: CheckPassword 密码验证
+// =============================================================================
+
+func TestCheckPassword(t *testing.T) {
+	hash, _ := HashPassword("admin123")
+
+	tests := []struct {
+		name     string
+		password string
+		wantErr  bool
+	}{
+		{
+			name:     "A-08 正确密码匹配",
+			password: "admin123",
+			wantErr:  false,
+		},
+		{
+			name:     "A-09 错误密码不匹配",
+			password: "wrong-password",
+			wantErr:  true,
+		},
+		{
+			name:     "A-09 空密码不匹配",
+			password: "",
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := CheckPassword(hash, tt.password)
+			if tt.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Tier 3 — A-10~A-14: Login (需 pgxmock)
+// NOTE: Login uses *pgxpool.Pool (concrete type), requires interface refactor to mock.
+// =============================================================================
+
 func TestValidateTokenEmpty(t *testing.T) {
 	s := New(nil, "test-secret")
 

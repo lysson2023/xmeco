@@ -13,8 +13,7 @@ import (
 	"time"
 
 	"xmeco/internal/gateway/transport"
-
-	"github.com/jackc/pgx/v5/pgxpool"
+	"xmeco/internal/repository/postgres"
 )
 
 // Custom protocol constants
@@ -54,11 +53,11 @@ type Manager struct {
 	dtuListener    net.Listener
 	poller         PollerFn
 	deviceLoader   DeviceLoaderFn
-	pool           *pgxpool.Pool
+	pool           postgres.DBTX
 	pollInterval   time.Duration
 }
 
-func NewManager(poller PollerFn, loader DeviceLoaderFn, pool *pgxpool.Pool) *Manager {
+func NewManager(poller PollerFn, loader DeviceLoaderFn, pool postgres.DBTX) *Manager {
 	return &Manager{poller: poller, deviceLoader: loader, pool: pool, pollInterval: 3 * time.Second, gateways: make(map[string]*Gateway)}
 }
 
@@ -157,8 +156,8 @@ func (m *Manager) handleDTUConn(ctx context.Context, conn net.Conn) {
 			remoteIP = host
 		}
 		// Look up gateway_config for DTU entries matching this IP.
-		// Use exact match on dtu_ip_expected to avoid substring false positives
-		// (e.g. 192.168.1.1 matching 192.168.1.10).
+		// Use comma-anchored LIKE patterns to avoid substring false positives
+		// (e.g. 192.168.1.1 matching 192.168.1.10 in a CSV list).
 		if m.pool != nil {
 			var gwImei string
 			if err2 := m.pool.QueryRow(ctx,
@@ -166,9 +165,14 @@ func (m *Manager) handleDTUConn(ctx context.Context, conn net.Conn) {
 				 WHERE gateway_type='dtu'
 				   AND (dtu_ip_expected = $1
 				      OR dtu_ip_expected LIKE $2
-				      OR dtu_ip_expected LIKE $3)
+				      OR dtu_ip_expected LIKE $3
+				      OR dtu_ip_expected LIKE $4)
 				 LIMIT 1`,
-				remoteIP, remoteIP+",%", "%,"+remoteIP+",%").Scan(&gwImei); err2 == nil {
+				remoteIP,
+				remoteIP+",%",       // start of CSV (anchored by trailing comma)
+				"%,"+remoteIP+",%",  // middle of CSV (anchored both sides)
+				"%,"+remoteIP,        // end of CSV (anchored by leading comma)
+			).Scan(&gwImei); err2 == nil {
 				id = gwImei
 				slog.Info("DTU resolved by IP", "remote", remoteIP, "imei", id)
 			}
@@ -275,5 +279,7 @@ func (m *Manager) HandleListGateways(w http.ResponseWriter, r *http.Request) {
 	if ids == nil {
 		ids = []string{}
 	}
-	json.NewEncoder(w).Encode(map[string]any{"gateways": ids})
+	if err := json.NewEncoder(w).Encode(map[string]any{"gateways": ids}); err != nil {
+		slog.Warn("HandleListGateways encode failed", "err", err)
+	}
 }

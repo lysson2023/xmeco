@@ -175,6 +175,167 @@ func TestCondCNUnknownReturnsCode(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Tier 2 — AL-12: range 仅上限 (仅 maxVal 有效)
+// =============================================================================
+
+func TestTriggeredRangeMaxOnly(t *testing.T) {
+	// AL-12: 仅设置上限(无下限)，值超出上限应触发
+	tests := []struct {
+		name  string
+		minV  string
+		maxV  string
+		val   float64
+		want  bool
+	}{
+		{
+			name: "AL-12 仅上限-值超出触发",
+			minV:  "",
+			maxV:  "30",
+			val:   35.0,
+			want:  true,
+		},
+		{
+			name: "AL-12 仅上限-值在范围内不触发",
+			minV:  "",
+			maxV:  "30",
+			val:   25.0,
+			want:  false,
+		},
+		{
+			name: "AL-12 仅上限-值等于上限不触发(闭区间)",
+			minV:  "",
+			maxV:  "30",
+			val:   30.0,
+			want:  false,
+		},
+		{
+			name: "仅下限-值低于触发",
+			minV:  "10",
+			maxV:  "",
+			val:   5.0,
+			want:  true,
+		},
+		{
+			name: "仅下限-值在范围内不触发",
+			minV:  "10",
+			maxV:  "",
+			val:   15.0,
+			want:  false,
+		},
+		{
+			name: "双限均空-不触发",
+			minV:  "",
+			maxV:  "",
+			val:   100.0,
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := triggered("range", tt.val, 0, tt.minV, tt.maxV)
+			if got != tt.want {
+				t.Errorf("triggered(range, %.1f, 0, %q, %q) = %v, want %v",
+					tt.val, tt.minV, tt.maxV, got, tt.want)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Tier 2 — buildAlarmMsg 告警消息构建
+// =============================================================================
+
+func TestBuildAlarmMsg(t *testing.T) {
+	tests := []struct {
+		name       string
+		deviceName string
+		metric     string
+		value      float64
+		cond       string
+		threshold  float64
+		minV       string
+		maxV       string
+		wantSubstr string // 消息应包含的关键字
+	}{
+		{
+			name:       "gt-超过阈值",
+			deviceName: "冷水机组1",
+			metric:     "temperature",
+			value:      35.5,
+			cond:       "gt",
+			threshold:  30.0,
+			wantSubstr: "冷水机组1 temperature 35.5 超过 阈值 30.0",
+		},
+		{
+			name:       "ge-达到或超过",
+			deviceName: "泵站A",
+			metric:     "pressure",
+			value:      1.5,
+			cond:       "ge",
+			threshold:  1.0,
+			wantSubstr: "泵站A pressure 1.5 达到或超过 阈值 1.0",
+		},
+		{
+			name:       "lt-低于阈值",
+			deviceName: "锅炉1",
+			metric:     "level",
+			value:      0.5,
+			cond:       "lt",
+			threshold:  1.0,
+			wantSubstr: "锅炉1 level 0.5 低于 阈值 1.0",
+		},
+		{
+			name:       "le-达到或低于",
+			deviceName: "冷却塔",
+			metric:     "flow",
+			value:      2.0,
+			cond:       "le",
+			threshold:  2.5,
+			wantSubstr: "冷却塔 flow 2.0 达到或低于 阈值 2.5",
+		},
+		{
+			name:       "eq-等于",
+			deviceName: "传感器A",
+			metric:     "status",
+			value:      1.0,
+			cond:       "eq",
+			threshold:  1.0,
+			wantSubstr: "传感器A status 1.0 等于 1.0",
+		},
+		{
+			name:       "range-超出范围",
+			deviceName: "机组B",
+			metric:     "humidity",
+			value:      95.0,
+			cond:       "range",
+			minV:       "30",
+			maxV:       "80",
+			wantSubstr: "机组B humidity 95.0 超出范围 [30, 80]",
+		},
+		{
+			name:       "未知条件原样返回代码",
+			deviceName: "dev1",
+			metric:     "m",
+			value:      1.0,
+			cond:       "custom_cond",
+			threshold:  0.5,
+			wantSubstr: "dev1 m 1.0 custom_cond 阈值 0.5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildAlarmMsg(tt.deviceName, tt.metric, tt.value, tt.cond, tt.threshold, tt.minV, tt.maxV)
+			if got != tt.wantSubstr {
+				// For buildAlarmMsg the format is exact, check full string match
+				t.Errorf("buildAlarmMsg() = %q, want %q", got, tt.wantSubstr)
+			}
+		})
+	}
+}
+
 func BenchmarkTriggered(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		triggered("gt", 75.5, 70.0, "", "")

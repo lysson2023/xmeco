@@ -21,9 +21,18 @@ func main() {
 		dsn = os.Args[1]
 	}
 
-	newPassword := "admin123"
-	if len(os.Args) > 2 {
-		newPassword = os.Args[2]
+	// Require explicit password — no hardcoded default.
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "Usage: go run tools/fix_admin.go [dsn] <new_password> [username] --force")
+		fmt.Fprintln(os.Stderr, "  dsn          Database URL (or set XMECO_DATABASE_URL)")
+		fmt.Fprintln(os.Stderr, "  new_password New password for the user (required)")
+		fmt.Fprintln(os.Stderr, "  username     Target user (default: admin)")
+		os.Exit(1)
+	}
+	newPassword := os.Args[2]
+	if newPassword == "" {
+		fmt.Fprintln(os.Stderr, "Password cannot be empty")
+		os.Exit(1)
 	}
 	targetUser := "admin"
 	if len(os.Args) > 3 {

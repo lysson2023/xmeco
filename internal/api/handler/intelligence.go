@@ -6,8 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
+	"xmeco/internal/repository/postgres"
 	"xmeco/internal/service/intelligence"
 )
 
@@ -32,7 +31,7 @@ func parseTimeParam(s string) (time.Time, error) {
 	return t, e
 }
 
-func NewIntelligenceHandler(pool *pgxpool.Pool) *IntelligenceHandler {
+func NewIntelligenceHandler(pool postgres.DBTX) *IntelligenceHandler {
 	return &IntelligenceHandler{svc: intelligence.New(pool)}
 }
 

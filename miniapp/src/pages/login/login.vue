@@ -9,14 +9,14 @@
     </view>
     <view class="form">
       <view class="field">
-        <text class="label">Username</text>
-        <input class="input" v-model="username" placeholder="Enter username" placeholder-style="color:rgba(255,255,255,0.3)" />
+        <text class="label">用户名</text>
+        <input class="input" v-model="username" placeholder="请输入用户名" placeholder-style="color:rgba(255,255,255,0.3)" />
       </view>
       <view class="field">
-        <text class="label">Password</text>
-        <input class="input" v-model="password" placeholder="Enter password" password placeholder-style="color:rgba(255,255,255,0.3)" />
+        <text class="label">密码</text>
+        <input class="input" v-model="password" placeholder="请输入密码" password placeholder-style="color:rgba(255,255,255,0.3)" />
       </view>
-      <button class="login-btn" :loading="loading" @click="doLogin">{{ loading ? 'Logging in...' : 'Login' }}</button>
+      <button class="login-btn" :loading="loading" @click="doLogin">{{ loading ? '登录中...' : '登 录' }}</button>
     </view>
     <text class="footer-text">Shenzhen High Altitude Technology Co., Ltd.</text>
   </view>
@@ -27,10 +27,7 @@ import { ref, onMounted } from 'vue';
 import { api } from '../../api/client';
 const username = ref(''), password = ref(''), loading = ref(false);
 onMounted(() => {
-  // 已登录用户直接跳转首页
-  if (api.getToken()) {
-    uni.switchTab({ url: '/pages/index/index' })
-  }
+  // 全局登录守卫在 App.vue 中统一处理，此处不再重复检查避免竞态
 });
 const doLogin = async () => {
   if (!username.value || !password.value) { uni.showToast({ title: '请输入用户名和密码', icon: 'none' }); return; }

@@ -7,12 +7,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+
+	"xmeco/internal/repository/postgres"
 )
 
-type TelemetryHandler struct{ pool *pgxpool.Pool }
+type TelemetryHandler struct{ pool postgres.DBTX }
 
-func NewTelemetryHandler(pool *pgxpool.Pool) *TelemetryHandler { return &TelemetryHandler{pool} }
+func NewTelemetryHandler(pool postgres.DBTX) *TelemetryHandler { return &TelemetryHandler{pool} }
 
 func (h *TelemetryHandler) Realtime(w http.ResponseWriter, r *http.Request) {
 	deviceID := queryInt(r, "device_id")

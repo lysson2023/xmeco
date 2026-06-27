@@ -73,17 +73,56 @@ func TestBuildingRepoGetByID(t *testing.T) {
 	}
 }
 
-func TestBuildingRepoGetByIDNotFound(t *testing.T) {
-	mock, _ := pgxmock.NewPool()
-	defer mock.Close()
-	repo := NewBuildingRepo(mock)
+// R-01: GetByID 找不到记录时返回 (nil, nil)，而非 error
+func TestBuildingRepoGetByID_NotFound(t *testing.T) {
+	tests := []struct {
+		name      string
+		mockSetup func(mock pgxmock.PgxPoolIface)
+		wantObj   *domain.Building
+		wantErr   bool
+	}{
+		{
+			name: "R-01 未找到记录返回nil,nil",
+			mockSetup: func(mock pgxmock.PgxPoolIface) {
+				mock.ExpectQuery("SELECT (.+) FROM building WHERE id=\\$1").WithArgs(999).
+					WillReturnError(pgx.ErrNoRows)
+			},
+			wantObj: nil,
+			wantErr: false,
+		},
+		{
+			name: "数据库异常返回error",
+			mockSetup: func(mock pgxmock.PgxPoolIface) {
+				mock.ExpectQuery("SELECT (.+) FROM building WHERE id=\\$1").WithArgs(1).
+					WillReturnError(errors.New("connection refused"))
+			},
+			wantObj: nil,
+			wantErr: true,
+		},
+	}
 
-	mock.ExpectQuery("SELECT (.+) FROM building WHERE id=\\$1").WithArgs(999).
-		WillReturnError(pgx.ErrNoRows)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock, _ := pgxmock.NewPool()
+			defer mock.Close()
+			repo := NewBuildingRepo(mock)
 
-	_, err := repo.GetByID(context.TODO(), 999)
-	if err == nil {
-		t.Fatal("expected error for non-existent building")
+			tt.mockSetup(mock)
+
+			obj, err := repo.GetByID(context.TODO(), 999)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if obj != nil {
+				t.Errorf("expected nil object, got %+v", obj)
+			}
+		})
 	}
 }
 
@@ -173,6 +212,59 @@ func TestDeviceRepoGetByID(t *testing.T) {
 	}
 	if d.Name != "主机1" || d.DeviceStatus != "运行中" {
 		t.Errorf("unexpected: Name=%q Status=%q", d.Name, d.DeviceStatus)
+	}
+}
+
+// R-09: DeviceRepo.GetByID 找不到记录时返回 (nil, nil)
+func TestDeviceRepoGetByID_NotFound(t *testing.T) {
+	tests := []struct {
+		name      string
+		mockSetup func(mock pgxmock.PgxPoolIface)
+		wantObj   *domain.Device
+		wantErr   bool
+	}{
+		{
+			name: "R-09 未找到记录返回nil,nil",
+			mockSetup: func(mock pgxmock.PgxPoolIface) {
+				mock.ExpectQuery("SELECT (.+) FROM device WHERE id=\\$1").WithArgs(999).
+					WillReturnError(pgx.ErrNoRows)
+			},
+			wantObj: nil,
+			wantErr: false,
+		},
+		{
+			name: "数据库异常返回error",
+			mockSetup: func(mock pgxmock.PgxPoolIface) {
+				mock.ExpectQuery("SELECT (.+) FROM device WHERE id=\\$1").WithArgs(1).
+					WillReturnError(errors.New("connection refused"))
+			},
+			wantObj: nil,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock, _ := pgxmock.NewPool()
+			defer mock.Close()
+			repo := NewDeviceRepo(mock)
+
+			tt.mockSetup(mock)
+
+			obj, err := repo.GetByID(context.TODO(), 999)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if obj != nil {
+				t.Errorf("expected nil object, got %+v", obj)
+			}
+		})
 	}
 }
 
@@ -327,17 +419,56 @@ func TestProjectRepoGetByID(t *testing.T) {
 	}
 }
 
-func TestProjectRepoGetByIDNotFound(t *testing.T) {
-	mock, _ := pgxmock.NewPool()
-	defer mock.Close()
-	repo := NewProjectRepo(mock)
+// R-20: GetByID 找不到记录时返回 (nil, nil)
+func TestProjectRepoGetByID_NotFound(t *testing.T) {
+	tests := []struct {
+		name      string
+		mockSetup func(mock pgxmock.PgxPoolIface)
+		wantObj   *domain.Project
+		wantErr   bool
+	}{
+		{
+			name: "R-20 未找到记录返回nil,nil",
+			mockSetup: func(mock pgxmock.PgxPoolIface) {
+				mock.ExpectQuery("SELECT (.+) FROM project WHERE id=\\$1").WithArgs(999).
+					WillReturnError(pgx.ErrNoRows)
+			},
+			wantObj: nil,
+			wantErr: false,
+		},
+		{
+			name: "数据库异常返回error",
+			mockSetup: func(mock pgxmock.PgxPoolIface) {
+				mock.ExpectQuery("SELECT (.+) FROM project WHERE id=\\$1").WithArgs(1).
+					WillReturnError(errors.New("connection refused"))
+			},
+			wantObj: nil,
+			wantErr: true,
+		},
+	}
 
-	mock.ExpectQuery("SELECT (.+) FROM project WHERE id=\\$1").WithArgs(999).
-		WillReturnError(pgx.ErrNoRows)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock, _ := pgxmock.NewPool()
+			defer mock.Close()
+			repo := NewProjectRepo(mock)
 
-	_, err := repo.GetByID(context.TODO(), 999)
-	if err == nil {
-		t.Fatal("expected error")
+			tt.mockSetup(mock)
+
+			obj, err := repo.GetByID(context.TODO(), 999)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if obj != nil {
+				t.Errorf("expected nil object, got %+v", obj)
+			}
+		})
 	}
 }
 

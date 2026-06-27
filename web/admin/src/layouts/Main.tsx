@@ -19,6 +19,7 @@ import {
   RobotOutlined,
   DashboardOutlined,
   ToolOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons';
 import ErrorBoundary from '../components/ErrorBoundary';
 
@@ -38,6 +39,7 @@ const menuItems: MenuProps['items'] = [
   { key: '/registers', icon: <CodeOutlined />, label: '寄存器' },
   { key: '/alarms', icon: <AlertOutlined />, label: '告警管理' },
   { key: '/startup-plans', icon: <PlayCircleOutlined />, label: '启停配置' },
+  { key: '/task-center', icon: <UnorderedListOutlined />, label: '任务中心' },
   { key: '/maintenance-records', icon: <ToolOutlined />, label: '维保记录' },
   { type: 'divider' },
   { key: '/multi-agent', icon: <RobotOutlined />, label: '多智能体' },

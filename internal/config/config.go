@@ -28,12 +28,21 @@ type Config struct {
 // ErrNoSecret is returned when the JWT secret is the default and DEV_MODE is not enabled.
 var ErrNoSecret = errors.New("XMECO_JWT_SECRET is using the default value – refusing to start in non-dev mode. Set XMECO_JWT_SECRET or XMECO_DEV_MODE=true")
 
-const defaultJWTSecret = "xmeco-dev-secret-change-in-production"
+// ErrDefaultDBPassword is returned when the DB password is the default and DEV_MODE is not enabled.
+var ErrDefaultDBPassword = errors.New("XMECO_DB_PASSWORD is using the default value – refusing to start in non-dev mode. Set XMECO_DB_PASSWORD or XMECO_DEV_MODE=true")
+
+const defaultJWTSecret = "xmeco-dev-secret-change-in-production" // DEV ONLY — 生产环境必须设置 XMECO_JWT_SECRET
+const defaultDBPassword = "xmeco123"                             // DEV ONLY — 生产环境必须设置 XMECO_DB_PASSWORD
 
 func Load() (*Config, error) {
+	devMode := strings.EqualFold(getEnv("XMECO_DEV_MODE", ""), "true")
 	jwtSecret := getEnv("XMECO_JWT_SECRET", defaultJWTSecret)
-	if jwtSecret == defaultJWTSecret && getEnv("XMECO_DEV_MODE", "") != "true" {
+	if jwtSecret == defaultJWTSecret && !devMode {
 		return nil, ErrNoSecret
+	}
+	dbPassword := getEnv("XMECO_DB_PASSWORD", defaultDBPassword)
+	if dbPassword == defaultDBPassword && !devMode {
+		return nil, ErrDefaultDBPassword
 	}
 	allowedOrigins := getEnv("XMECO_ALLOWED_ORIGINS", "*")
 	trustedProxy := getEnv("XMECO_TRUSTED_PROXY", "")
@@ -41,7 +50,7 @@ func Load() (*Config, error) {
 		DBHost:          getEnv("XMECO_DB_HOST", "localhost"),
 		DBPort:          getEnv("XMECO_DB_PORT", "5432"),
 		DBUser:          getEnv("XMECO_DB_USER", "postgres"),
-		DBPassword:      getEnv("XMECO_DB_PASSWORD", "xmeco123"),
+		DBPassword:      dbPassword,
 		DBName:          getEnv("XMECO_DB_NAME", "xmeco"),
 		DBSSLMode:       getEnv("XMECO_DB_SSLMODE", "disable"),
 		ServerPort:      getEnv("XMECO_SERVER_PORT", "9090"),

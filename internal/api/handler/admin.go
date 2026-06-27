@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -18,6 +19,14 @@ type AdminHandler struct {
 
 func NewAdminHandler(repo *postgres.AdminRepo, authSvc *auth.Service) *AdminHandler {
 	return &AdminHandler{repo: repo, authSvc: authSvc}
+}
+
+// validatePasswordLength 校验密码最小长度为 8 位。
+func validatePasswordLength(s string) error {
+	if len(s) < 8 {
+		return fmt.Errorf("密码长度不能少于 8 位")
+	}
+	return nil
 }
 
 // ==================== 用户管理 ====================
@@ -42,6 +51,10 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Username == "" || req.Password == "" || req.RoleID == 0 {
 		writeJSON(w, http.StatusBadRequest, M{"error": "用户名、密码、角色不能为空"})
+		return
+	}
+	if err := validatePasswordLength(req.Password); err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": err.Error()})
 		return
 	}
 	hash, err := auth.HashPassword(req.Password)
@@ -111,6 +124,10 @@ func (h *AdminHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.NewPassword == "" {
 		writeJSON(w, http.StatusBadRequest, M{"error": "请输入新密码"})
+		return
+	}
+	if err := validatePasswordLength(body.NewPassword); err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": err.Error()})
 		return
 	}
 	targetID := pathID(r)

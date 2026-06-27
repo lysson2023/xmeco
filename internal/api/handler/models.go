@@ -17,7 +17,6 @@ import (
 	"xmeco/internal/repository/postgres"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type M map[string]any
@@ -32,14 +31,19 @@ func pathID(r *http.Request) int {
 	id, _ := strconv.Atoi(r.PathValue("id"))
 	return id
 }
-func boolVal(p *bool, defaultVal bool) bool {
-	if p == nil { return defaultVal }
-	return *p
-}
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	// Marshal first so we don't send partial body with a committed status code.
+	body, err := json.Marshal(v)
+	if err != nil {
+		slog.Error("writeJSON marshal failed", "err", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"内部服务器错误"}`))
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	w.Write(body)
 }
 func ok(w http.ResponseWriter, v interface{})     { writeJSON(w, http.StatusOK, v) }
 func created(w http.ResponseWriter, v interface{}) { writeJSON(w, http.StatusCreated, v) }
@@ -87,18 +91,24 @@ func (h *BuildingHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // ===== DEVICE =====
-type DeviceHandler struct {
-	repo  *postgres.DeviceRepo
-	pool  *pgxpool.Pool
-	gwMgr *gateway.Manager
+// GatewayManager abstracts the gateway manager to allow unit-testing dispatchHardware
+// without a real gateway connection. The concrete *gateway.Manager satisfies this interface.
+type GatewayManager interface {
+	GetGateway(id string) *gateway.Gateway
 }
 
-func NewDeviceHandler(r *postgres.DeviceRepo, pool *pgxpool.Pool) *DeviceHandler {
+type DeviceHandler struct {
+	repo  *postgres.DeviceRepo
+	pool  postgres.DBTX
+	gwMgr GatewayManager
+}
+
+func NewDeviceHandler(r *postgres.DeviceRepo, pool postgres.DBTX) *DeviceHandler {
 	return &DeviceHandler{repo: r, pool: pool}
 }
 
 // SetGwMgr sets the gateway manager for hardware device control.
-func (h *DeviceHandler) SetGwMgr(mgr *gateway.Manager) { h.gwMgr = mgr }
+func (h *DeviceHandler) SetGwMgr(mgr GatewayManager) { h.gwMgr = mgr }
 
 func (h *DeviceHandler) List(w http.ResponseWriter, r *http.Request) {
 	list, err := h.repo.List(r.Context(), queryInt(r, "building_id"))
@@ -311,6 +321,10 @@ func controlActionCN(action string) (controlVal, deviceStatus string) {
 		return "暂停", "暂停"
 	case "resume":
 		return "恢复", "开机"
+	case "set_value":
+		return "设值", ""
+	case "mode_change":
+		return "切换模式", ""
 	default:
 		return action, ""
 	}
@@ -338,14 +352,14 @@ func (h *DeviceHandler) dispatchHardware(ctx context.Context, devID int, action 
 	if gw == nil || gw.Transport == nil || !gw.Transport.IsConnected() {
 		return dispatchResult{Dispatched: false, Message: "gateway offline or not connected"}
 	}
-	var writeAddr *int
-	var writeCode *string
+	var writeAddr int
+	var writeCode string
 	err = h.pool.QueryRow(ctx,
 		`SELECT r.write_addr, r.write_code FROM register r
 		 JOIN device_properties dp ON dp.id=r.property_id
 		 WHERE dp.device_id=$1 AND r.write_addr>0 AND r.command_code=$2
 		 ORDER BY r.id LIMIT 1`, devID, action).Scan(&writeAddr, &writeCode)
-	if err != nil || writeAddr == nil || writeCode == nil {
+	if err != nil {
 		slog.Warn("dispatchHardware: no register config", "dev", devID, "action", action)
 		return dispatchResult{Dispatched: false, Message: "no register write config for action: " + action}
 	}
@@ -358,14 +372,14 @@ func (h *DeviceHandler) dispatchHardware(ctx context.Context, devID int, action 
 	case "stop", "pause":
 		writeVal = 0x0000
 	}
-	cmd := modbus.BuildWriteCommand(byte(dn), modbus.CodeFromStr(*writeCode), uint16(*writeAddr), 1, writeVal)
+	cmd := modbus.BuildWriteCommand(byte(dn), modbus.CodeFromStr(writeCode), uint16(writeAddr), 1, writeVal)
 	if gwType == "custom" {
 		lora := []byte{byte(nodeAddr >> 8), byte(nodeAddr)}
 		cmd = append(lora, cmd...)
 	}
 	if _, err := gw.Transport.SendAndReceive(cmd); err != nil {
 		slog.Warn("gateway dispatch failed", "dev", devID, "gw", gwImei, "err", err)
-		return dispatchResult{Dispatched: false, Message: "gateway dispatch failed: " + err.Error()}
+		return dispatchResult{Dispatched: false, Message: "gateway dispatch failed"}
 	}
 	slog.Info("gateway dispatch ok", "dev", devID, "gw", gwImei, "action", action)
 	return dispatchResult{Dispatched: true, Message: "ok"}
@@ -401,9 +415,9 @@ func (h *DeviceHandler) Control(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err = h.pool.Exec(r.Context(), `
-		INSERT INTO control_record (project_name, building_name, device_name, prop_name, control_value, username, user_remark)
-		VALUES ($1, $2, $3, '设备控制', $4, $5, $6)`,
-		projName, bldName, devName, controlVal, username, body.Action)
+		INSERT INTO control_record (project_name, building_name, device_name, device_id, prop_name, control_value, username, user_remark)
+		VALUES ($1, $2, $3, $4, '设备控制', $5, $6, $7)`,
+		projName, bldName, devName, id, controlVal, username, body.Action)
 	if err != nil {
 		serverErr(w, err)
 		return

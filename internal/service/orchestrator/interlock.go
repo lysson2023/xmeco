@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"xmeco/internal/repository/postgres"
 )
 
-type Interlock struct{ pool *pgxpool.Pool }
+type Interlock struct{ pool postgres.DBTX }
 
-func NewInterlock(pool *pgxpool.Pool) *Interlock { return &Interlock{pool} }
+func NewInterlock(pool postgres.DBTX) *Interlock { return &Interlock{pool} }
 
 // Check verifies that all interlock conditions for a target device+action are met
 func (il *Interlock) Check(ctx context.Context, targetDeviceID int, action string) error {

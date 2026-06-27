@@ -6,18 +6,22 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"xmeco/internal/api/middleware"
+	"xmeco/internal/repository/postgres"
 	"xmeco/internal/service/external/weather"
 )
 
+const (
+	baseRunningDays = 1000 // 项目创建前的初始运营天数
+	carbonFactor    = 0.58 // 中国电网碳排放系数 kg CO₂/kWh
+)
+
 type DashboardHandler struct {
-	pool       *pgxpool.Pool
+	pool       postgres.DBTX
 	weatherSvc *weather.Service
 }
 
-func NewDashboardHandler(pool *pgxpool.Pool, weatherSvc *weather.Service) *DashboardHandler {
+func NewDashboardHandler(pool postgres.DBTX, weatherSvc *weather.Service) *DashboardHandler {
 	return &DashboardHandler{pool: pool, weatherSvc: weatherSvc}
 }
 
@@ -41,7 +45,7 @@ func (h *DashboardHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	if err := h.pool.QueryRow(r.Context(), `SELECT COALESCE(EXTRACT(DAY FROM NOW()-date(value))::int,0) FROM dashboard_config WHERE key='days_start'`).Scan(&baseDays); err != nil {
 		slog.Warn("dashboard base days failed", "err", err)
 	}
-	cfg["running_days"] = fmt.Sprint(1000 + baseDays)
+	cfg["running_days"] = fmt.Sprint(baseRunningDays + baseDays)
 	cfg["online_devices"] = fmt.Sprint(online)
 	cfg["today_alarms"] = fmt.Sprint(alarms)
 	ok(w, cfg)
@@ -72,7 +76,9 @@ func (h *DashboardHandler) ScreenData(w http.ResponseWriter, r *http.Request) {
 	if claims != nil {
 		out["username"] = claims.Username
 		var an string
-		h.pool.QueryRow(ctx, `SELECT COALESCE(a.name,'') FROM users u LEFT JOIN agent a ON a.id=u.agent_id WHERE u.id=$1`, claims.UserID).Scan(&an)
+		if err := h.pool.QueryRow(ctx, `SELECT COALESCE(a.name,'') FROM users u LEFT JOIN agent a ON a.id=u.agent_id WHERE u.id=$1`, claims.UserID).Scan(&an); err != nil {
+			slog.Warn("ScreenData agent name query failed", "err", err)
+		}
 		out["agent_name"] = an
 	}
 
@@ -114,14 +120,16 @@ func (h *DashboardHandler) ScreenData(w http.ResponseWriter, r *http.Request) {
 	}
 	var projs []map[string]any
 	if pr != nil {
-		defer pr.Close()
 		for pr.Next() {
 			var id int
 			var n string
-			if pr.Scan(&id, &n) == nil {
-				projs = append(projs, map[string]any{"id": id, "name": n})
+			if err := pr.Scan(&id, &n); err != nil {
+				slog.Warn("ScreenData project scan failed", "err", err)
+				continue
 			}
+			projs = append(projs, map[string]any{"id": id, "name": n})
 		}
+		pr.Close()
 	}
 	if projs == nil { projs = []map[string]any{} }
 	out["projects"] = projs
@@ -138,14 +146,16 @@ func (h *DashboardHandler) ScreenData(w http.ResponseWriter, r *http.Request) {
 	}
 	var blds []map[string]any
 	if br != nil {
-		defer br.Close()
 		for br.Next() {
 			var id int
 			var n string
-			if br.Scan(&id, &n) == nil {
-				blds = append(blds, map[string]any{"id": id, "name": n})
+			if err := br.Scan(&id, &n); err != nil {
+				slog.Warn("ScreenData building scan failed", "err", err)
+				continue
 			}
+			blds = append(blds, map[string]any{"id": id, "name": n})
 		}
+		br.Close()
 	}
 	if blds == nil { blds = []map[string]any{} }
 	out["buildings"] = blds
@@ -173,14 +183,16 @@ func (h *DashboardHandler) ScreenData(w http.ResponseWriter, r *http.Request) {
 		 ORDER BY d.id`, pid, bid)
 	var devs []map[string]any
 	if dr != nil {
-		defer dr.Close()
 		for dr.Next() {
 			var id int
 			var n, tp, st, ds, kv string
-			if dr.Scan(&id, &n, &tp, &st, &ds, &kv) == nil {
-				devs = append(devs, map[string]any{"id": id, "name": n, "type": tp, "status": st, "device_status": ds, "key_info": kv})
+			if scanErr := dr.Scan(&id, &n, &tp, &st, &ds, &kv); scanErr != nil {
+				slog.Warn("ScreenData device scan failed", "err", scanErr)
+				continue
 			}
+			devs = append(devs, map[string]any{"id": id, "name": n, "type": tp, "status": st, "device_status": ds, "key_info": kv})
 		}
+		dr.Close()
 	}
 	if err != nil {
 		slog.Warn("ScreenData devices query failed", "err", err)
@@ -213,14 +225,16 @@ func (h *DashboardHandler) ScreenData(w http.ResponseWriter, r *http.Request) {
 	}
 	var tasks []map[string]any
 	if tr != nil {
-		defer tr.Close()
 		for tr.Next() {
 			var n, dn, at, ti, res string
 			var en bool
-			if tr.Scan(&n, &dn, &at, &ti, &en, &res) == nil {
-				tasks = append(tasks, map[string]any{"name": n, "device": dn, "action": at, "time": ti, "enabled": en, "result": res})
+			if err := tr.Scan(&n, &dn, &at, &ti, &en, &res); err != nil {
+				slog.Warn("ScreenData task scan failed", "err", err)
+				continue
 			}
+			tasks = append(tasks, map[string]any{"name": n, "device": dn, "action": at, "time": ti, "enabled": en, "result": res})
 		}
+		tr.Close()
 	}
 	if tasks == nil { tasks = []map[string]any{} }
 	out["tasks"] = tasks
@@ -232,13 +246,15 @@ func (h *DashboardHandler) ScreenData(w http.ResponseWriter, r *http.Request) {
 	}
 	var alarms []map[string]any
 	if ar != nil {
-		defer ar.Close()
 		for ar.Next() {
 			var dev, at, lv, msg, ti string
-			if ar.Scan(&dev, &at, &lv, &msg, &ti) == nil {
-				alarms = append(alarms, map[string]any{"device": dev, "type": at, "level": lv, "msg": msg, "time": ti})
+			if err := ar.Scan(&dev, &at, &lv, &msg, &ti); err != nil {
+				slog.Warn("ScreenData alarm scan failed", "err", err)
+				continue
 			}
+			alarms = append(alarms, map[string]any{"device": dev, "type": at, "level": lv, "msg": msg, "time": ti})
 		}
+		ar.Close()
 	}
 	if alarms == nil { alarms = []map[string]any{} }
 	out["alarms"] = alarms
@@ -255,7 +271,7 @@ func (h *DashboardHandler) ScreenData(w http.ResponseWriter, r *http.Request) {
 	out["meter_power"] = meterPower
 	// savingRate stored as decimal (e.g., 0.25 = 25%), so multiply directly — no /100 needed.
 	out["power_saved"] = meterPower * savingRate
-	out["carbon_saved"] = meterPower * savingRate * 0.58
+	out["carbon_saved"] = meterPower * savingRate * carbonFactor
 
 	// Running days
 	var days int
@@ -265,21 +281,24 @@ func (h *DashboardHandler) ScreenData(w http.ResponseWriter, r *http.Request) {
 	out["running_days"] = days
 
 	// Individual meters (返回 power_sign 供前端显示加减标记)
-	mr, err := h.pool.Query(ctx, `SELECT d.name,COALESCE(d.power_sign,1),COALESCE((SELECT value FROM device_telemetry WHERE device_id=d.id AND metric IN ('有功功率','active_power','P') ORDER BY ts DESC LIMIT 1),0) FROM device d WHERE d.device_type='电表' AND ($1=0 OR d.building_id IN (SELECT id FROM building WHERE project_id=$1)) AND ($2=0 OR d.building_id=$2) ORDER BY d.id`, pid, bid)
+	mr, err := h.pool.Query(ctx, `SELECT d.id,d.name,COALESCE(d.power_sign,1),COALESCE((SELECT value FROM device_telemetry WHERE device_id=d.id AND metric IN ('有功功率','active_power','P') ORDER BY ts DESC LIMIT 1),0) FROM device d WHERE d.device_type='电表' AND ($1=0 OR d.building_id IN (SELECT id FROM building WHERE project_id=$1)) AND ($2=0 OR d.building_id=$2) ORDER BY d.id`, pid, bid)
 	if err != nil {
 		slog.Warn("ScreenData meters query failed", "err", err)
 	}
 	var meters []map[string]any
 	if mr != nil {
-		defer mr.Close()
 		for mr.Next() {
+			var id int
 			var n string
 			var sign int
 			var p float64
-			if mr.Scan(&n, &sign, &p) == nil {
-				meters = append(meters, map[string]any{"name": n, "sign": sign, "power": p})
+			if err := mr.Scan(&id, &n, &sign, &p); err != nil {
+				slog.Warn("ScreenData meter scan failed", "err", err)
+				continue
 			}
+			meters = append(meters, map[string]any{"id": id, "name": n, "sign": sign, "power": p})
 		}
+		mr.Close()
 	}
 	if meters == nil { meters = []map[string]any{} }
 	out["meters"] = meters

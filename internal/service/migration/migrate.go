@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"xmeco/internal/repository/postgres"
 )
 
 //go:embed sql/*.up.sql
@@ -19,7 +19,7 @@ var upFiles embed.FS
 // It creates the schema_migrations table if it doesn't exist,
 // handles existing databases by detecting already-applied tables,
 // and runs any pending up-scripts.
-func Run(ctx context.Context, pool *pgxpool.Pool) error {
+func Run(ctx context.Context, pool postgres.DBTX) error {
 	// 1. Ensure schema_migrations table
 	if _, err := pool.Exec(ctx,
 		`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -125,7 +125,7 @@ func listMigrationFiles() ([]migrationFile, error) {
 
 // detectExistingVersion checks which key tables exist and returns the
 // highest migration version that corresponds to those tables.
-func detectExistingVersion(ctx context.Context, pool *pgxpool.Pool, files []migrationFile) int {
+func detectExistingVersion(ctx context.Context, pool postgres.DBTX, files []migrationFile) int {
 	// Check for electricity_price table (migration 011)
 	var exists bool
 	err := pool.QueryRow(ctx,
@@ -219,7 +219,7 @@ func detectExistingVersion(ctx context.Context, pool *pgxpool.Pool, files []migr
 	return 0
 }
 
-func markApplied(ctx context.Context, pool *pgxpool.Pool, files []migrationFile, maxVersion int) {
+func markApplied(ctx context.Context, pool postgres.DBTX, files []migrationFile, maxVersion int) {
 	for _, f := range files {
 		if f.version > maxVersion {
 			break

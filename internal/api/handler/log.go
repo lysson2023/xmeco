@@ -6,15 +6,16 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"xmeco/internal/repository/postgres"
 )
 
-type LogHandler struct{ pool *pgxpool.Pool }
+type LogHandler struct{ pool postgres.DBTX }
 
-func NewLogHandler(pool *pgxpool.Pool) *LogHandler { return &LogHandler{pool} }
+func NewLogHandler(pool postgres.DBTX) *LogHandler { return &LogHandler{pool} }
 
 func (h *LogHandler) Telemetry(w http.ResponseWriter, r *http.Request) {
 	deviceID := queryInt(r, "device_id")
+	buildingID := queryInt(r, "building_id")
 	metric := r.URL.Query().Get("metric")     // empty = all
 	interval := r.URL.Query().Get("interval") // hour, day, month, year
 	start := r.URL.Query().Get("start")
@@ -41,10 +42,7 @@ func (h *LogHandler) Telemetry(w http.ResponseWriter, r *http.Request) {
 	argIdx := 1
 
 	if interval != "" && interval != "raw" {
-		trunc := truncMap[interval]
-		if trunc == "" {
-			trunc = "day"
-		}
+		trunc := truncMap[interval] // always valid after whitelist check
 		query = "SELECT date_trunc($1, ts) as ts, metric, AVG(value)::numeric(10,2) as avg_val, MAX(value)::numeric(10,2) as max_val, MIN(value)::numeric(10,2) as min_val, COUNT(*)::int as cnt FROM device_telemetry WHERE ts>=$2 AND ts<=$3"
 		args = append(args, trunc, start, end)
 		argIdx = 4
@@ -56,6 +54,11 @@ func (h *LogHandler) Telemetry(w http.ResponseWriter, r *http.Request) {
 	if deviceID > 0 {
 		query += " AND device_id=$" + itos(argIdx)
 		args = append(args, deviceID)
+		argIdx++
+	}
+	if buildingID > 0 {
+		query += " AND EXISTS (SELECT 1 FROM device d WHERE d.id=device_telemetry.device_id AND d.building_id=$" + itos(argIdx) + ")"
+		args = append(args, buildingID)
 		argIdx++
 	}
 	if metric != "" {
@@ -162,6 +165,8 @@ func (h *LogHandler) Controls(w http.ResponseWriter, r *http.Request) {
 	start := r.URL.Query().Get("start")
 	end := r.URL.Query().Get("end")
 	deviceID := queryInt(r, "device_id")
+	buildingID := queryInt(r, "building_id")
+	projectID := queryInt(r, "project_id")
 	if end == "" {
 		end = time.Now().Format("2006-01-02 15:04:05")
 	} else if len(end) == 10 {
@@ -172,15 +177,25 @@ func (h *LogHandler) Controls(w http.ResponseWriter, r *http.Request) {
 	}
 	export := r.URL.Query().Get("export") == "csv"
 
-	query := "SELECT created_at,project_name,building_name,device_name,prop_name,control_value,username,user_remark FROM control_record WHERE created_at>=$1 AND created_at<=$2"
+	query := "SELECT cr.created_at,cr.project_name,cr.building_name,cr.device_name,cr.prop_name,cr.control_value,cr.username,cr.user_remark,cr.device_id FROM control_record cr WHERE cr.created_at>=$1 AND cr.created_at<=$2"
 	args := []any{start, end}
 	argIdx := 3
 	if deviceID > 0 {
-		query += " AND EXISTS (SELECT 1 FROM device d WHERE d.name = control_record.device_name AND d.id=$" + itos(argIdx) + ")"
+		query += " AND cr.device_id=$" + itos(argIdx)
 		args = append(args, deviceID)
 		argIdx++
 	}
-	query += " ORDER BY created_at DESC LIMIT 1000"
+	if buildingID > 0 {
+		query += " AND EXISTS (SELECT 1 FROM device d WHERE d.id=cr.device_id AND d.building_id=$" + itos(argIdx) + ")"
+		args = append(args, buildingID)
+		argIdx++
+	}
+	if projectID > 0 {
+		query += " AND EXISTS (SELECT 1 FROM device d JOIN building b ON b.id=d.building_id WHERE d.id=cr.device_id AND b.project_id=$" + itos(argIdx) + ")"
+		args = append(args, projectID)
+		argIdx++
+	}
+	query += " ORDER BY cr.created_at DESC LIMIT 1000"
 
 	rows, err := h.pool.Query(r.Context(), query, args...)
 	if err != nil {
@@ -200,7 +215,8 @@ func (h *LogHandler) Controls(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var ts time.Time
 			var pn, bn, dn, pn2, cv, un, rm string
-			if err := rows.Scan(&ts, &pn, &bn, &dn, &pn2, &cv, &un, &rm); err != nil {
+			var did int
+			if err := rows.Scan(&ts, &pn, &bn, &dn, &pn2, &cv, &un, &rm, &did); err != nil {
 				slog.Warn("Controls export scan failed", "err", err)
 				continue
 			}
@@ -217,19 +233,20 @@ func (h *LogHandler) Controls(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type ctrl struct {
-		Ts     time.Time `json:"created_at"`
-		Proj   string    `json:"project_name"`
-		Bld    string    `json:"building_name"`
-		Dev    string    `json:"device_name"`
-		Prop   string    `json:"prop_name"`
-		Val    string    `json:"control_value"`
-		User   string    `json:"username"`
-		Remark string    `json:"user_remark"`
+		Ts       time.Time `json:"created_at"`
+		Proj     string    `json:"project_name"`
+		Bld      string    `json:"building_name"`
+		Dev      string    `json:"device_name"`
+		DeviceID int       `json:"device_id"`
+		Prop     string    `json:"prop_name"`
+		Val      string    `json:"control_value"`
+		User     string    `json:"username"`
+		Remark   string    `json:"user_remark"`
 	}
 	var list []ctrl
 	for rows.Next() {
 		var c ctrl
-		if err := rows.Scan(&c.Ts, &c.Proj, &c.Bld, &c.Dev, &c.Prop, &c.Val, &c.User, &c.Remark); err != nil {
+		if err := rows.Scan(&c.Ts, &c.Proj, &c.Bld, &c.Dev, &c.Prop, &c.Val, &c.User, &c.Remark, &c.DeviceID); err != nil {
 			slog.Warn("Controls scan failed", "err", err)
 			continue
 		}

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"xmeco/internal/repository/postgres"
 )
 
 type Plan struct {
@@ -35,10 +35,10 @@ type Execution struct {
 	TotalSteps int
 	DoneSteps  int
 	mu         sync.Mutex
-	pool       *pgxpool.Pool
+	pool       postgres.DBTX
 }
 
-func LoadPlan(ctx context.Context, pool *pgxpool.Pool, planID int) (*Plan, []Step, error) {
+func LoadPlan(ctx context.Context, pool postgres.DBTX, planID int) (*Plan, []Step, error) {
 	var p Plan
 	err := pool.QueryRow(ctx, `SELECT id,name,building_id,precheck_online,precheck_alarm FROM startup_plan WHERE id=$1`, planID).
 		Scan(&p.ID, &p.Name, &p.BuildingID, &p.PrecheckOnline, &p.PrecheckAlarm)
@@ -62,7 +62,7 @@ func LoadPlan(ctx context.Context, pool *pgxpool.Pool, planID int) (*Plan, []Ste
 	return &p, steps, rows.Err()
 }
 
-func StartExecution(ctx context.Context, pool *pgxpool.Pool, planID int, planName, triggeredBy string, totalSteps int) (*Execution, error) {
+func StartExecution(ctx context.Context, pool postgres.DBTX, planID int, planName, triggeredBy string, totalSteps int) (*Execution, error) {
 	var id int
 	err := pool.QueryRow(ctx,
 		`INSERT INTO startup_execution (plan_id,plan_name,triggered_by,status,total_steps,started_at) VALUES($1,$2,$3,'running',$4,$5) RETURNING id`,

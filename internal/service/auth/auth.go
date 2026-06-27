@@ -9,8 +9,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
+
+	"xmeco/internal/repository/postgres"
 )
 
 var (
@@ -20,7 +21,7 @@ var (
 )
 
 type Service struct {
-	pool      *pgxpool.Pool
+	pool      postgres.DBTX
 	jwtSecret []byte
 }
 
@@ -42,12 +43,12 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-func New(pool *pgxpool.Pool, secret string) *Service {
+func New(pool postgres.DBTX, secret string) *Service {
 	return &Service{pool: pool, jwtSecret: []byte(secret)}
 }
 
-// Pool 暴露连接池供 handler 做辅助查询（如 /auth/me 查 role name）
-func (s *Service) Pool() *pgxpool.Pool { return s.pool }
+// Pool exposes the database connection pool for auxiliary queries.
+func (s *Service) Pool() postgres.DBTX { return s.pool }
 
 // Login 验证用户名密码，返回 JWT token
 func (s *Service) Login(ctx context.Context, username, password string) (string, *User, error) {

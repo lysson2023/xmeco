@@ -24,13 +24,12 @@ func CORS(allowedOrigins string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqOrigin := r.Header.Get("Origin")
 		if wildcard {
-			// Per Fetch spec, Access-Control-Allow-Origin:* cannot be used with credentials.
-			// If the request carries an Authorization header, echo the request origin instead
-			// of using "*", otherwise the browser will block the response.
-			if r.Header.Get("Authorization") != "" && reqOrigin != "" {
-				w.Header().Set("Access-Control-Allow-Origin", reqOrigin)
-				w.Header().Set("Vary", "Origin")
-				slog.Warn("CORS: wildcard origin replaced due to credentialed request", "origin", reqOrigin)
+			// 安全策略：wildcard 模式仅用于开发环境。
+			// 携带 Authorization 头的凭据请求不反射 Origin（防止任意恶意网站跨域窃取数据）。
+			// 开发环境可通过 XMECO_ALLOWED_ORIGINS 设置具体域名白名单来支持凭据请求。
+			if r.Header.Get("Authorization") != "" {
+				slog.Warn("CORS: credentialed request blocked in wildcard mode — set XMECO_ALLOWED_ORIGINS to explicit domains", "origin", reqOrigin)
+				// 不设置 ACAO 头，浏览器将阻止响应（凭据请求不允许 *）
 			} else {
 				w.Header().Set("Access-Control-Allow-Origin", "*")
 			}
