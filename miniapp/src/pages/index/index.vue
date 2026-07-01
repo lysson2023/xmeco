@@ -31,19 +31,18 @@
   </view>
 </view></template>
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onShow } from 'vue';
 import { api } from '../../api/client';
 import { AuthError } from '../../api/client';
 const cfg = ref<any>({});
 const userName = ref('');
 const weather = ref<any>(null);
 const loading = ref(true);
-onMounted(async () => {
-  // 无 token 时直接跳过，等待 App.vue 的 reLaunch 生效，避免无效请求和 401 竞争
+
+const fetchDashboard = async () => {
   if (!api.getToken()) return
   try { const r = await api.get('/dashboard'); cfg.value = (r.data || {}) as any; } catch (e) { if (!(e instanceof AuthError)) uni.showToast({ title: '仪表盘数据加载失败', icon: 'none' }) }
   try { const r = await api.get('/auth/me'); userName.value = (r.data as any)?.username || ''; } catch (e) { if (!(e instanceof AuthError)) uni.showToast({ title: '用户信息加载失败', icon: 'none' }) }
-  // 获取项目天气
   try {
     const r = await api.get('/projects');
     const projects = r.data as any[];
@@ -53,7 +52,9 @@ onMounted(async () => {
     }
   } catch { /* 天气非关键数据，静默 */ }
   loading.value = false;
-});
+};
+
+onShow(() => { fetchDashboard(); });
 const goDevices = () => uni.switchTab({ url: '/pages/devices/devices' })
 const goAlarms = () => uni.switchTab({ url: '/pages/alarms/alarms' })
 const goHistory = () => uni.navigateTo({ url: '/pages/history/history' })

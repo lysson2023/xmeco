@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Select, Input, InputNumber, Button, Spin, Tag, message, Modal, Switch } from 'antd';
+import { Select, InputNumber, Button, Spin, Tag, message, Modal, Switch } from 'antd';
 import {
-  LogoutOutlined, UserOutlined, LockOutlined, ThunderboltOutlined,
+  LogoutOutlined, ThunderboltOutlined,
   EnvironmentOutlined, ClockCircleOutlined, AlertOutlined,
   DashboardOutlined, DatabaseOutlined, ToolOutlined,
   ScheduleOutlined, RocketOutlined, BulbOutlined,
@@ -14,8 +14,10 @@ import ScreenTaskCenter from './ScreenTaskCenter';
 import ScreenDecisionCenter from './ScreenDecisionCenter';
 import ScreenEnergyCenter from './ScreenEnergyCenter';
 import ErrorBoundary from '../components/ErrorBoundary';
+import { TopoRow, TopoCol } from '../components/TopoDevice';
 import { TOPO_ORDER, TOPO_COLORS, QUICK_MODES } from '../utils/constants';
 import './Login.css';
+import './Screen.css';
 
 // ---- Global keyframes for fault flashing (inject once, guarded by ID) ----
 if (!document.getElementById('screen-fault-pulse-style')) {
@@ -258,13 +260,13 @@ export default function Screen() {
   // 首次加载时显示全屏 Spin；后续轮询不显示（避免卸载子组件导致 state 丢失）
   const isFirstLoad = loading && !data.projects;
   if (isFirstLoad) {
-    return <div style={{ textAlign: 'center', padding: '40vh 0', background: '#0a1628', minHeight: '100vh' }}><Spin size="large" /></div>;
+    return <div style={{ textAlign: 'center', padding: '40vh 0', background: '#0b1515', minHeight: '100vh' }}><Spin size="large" /></div>;
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0a1628', color: '#c0d0e0', fontFamily: 'system-ui' }}>
+    <div className="screen-body" style={{ minHeight: '100vh' }}>
       {/* Row 1: Header */}
-      <div className="screen-header" style={{ display: 'flex', alignItems: 'center', padding: '6px 20px', background: '#0d1f3c', borderBottom: '1px solid #1a3455' }}>
+      <div className="screen-header" style={{ display: 'flex', alignItems: 'center', padding: '6px 20px' }}>
         <Select style={{ width: 140 }} placeholder="项目" value={pid || undefined}
           onChange={v => { setPid(v); setBid(0); }}
           options={(data.projects || []).map((p: any) => ({ value: p.id, label: p.name }))} />
@@ -279,13 +281,13 @@ export default function Screen() {
       </div>
 
       {/* Row 2: Tabs */}
-      <div style={{ display: 'flex', background: '#0d1f3c', borderBottom: '1px solid #1a3455' }}>
+      <div className="screen-tab-bar" style={{ display: 'flex' }}>
         {TABS.map(t => (
           <div key={t.key} className="screen-tab" onClick={() => setTab(t.key)} style={{
             padding: '10px 24px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-            background: tab === t.key ? '#152d50' : 'transparent',
-            color: tab === t.key ? '#00daf3' : '#8ba0c0',
-            borderBottom: tab === t.key ? '2px solid #00daf3' : '2px solid transparent',
+            background: tab === t.key ? 'rgba(1,218,243,0.10)' : 'transparent',
+            color: tab === t.key ? '#01daf3' : 'rgba(217,229,228,0.5)',
+            borderBottom: tab === t.key ? '2px solid #01daf3' : '2px solid transparent',
             fontWeight: tab === t.key ? 700 : 400,
           }}>{t.icon} {t.label}</div>
         ))}
@@ -304,27 +306,27 @@ export default function Screen() {
       ) : tab === 'energy' ? (
         <ScreenEnergyCenter key={`ec-${bid}`} bid={bid} devices={data.devices || []} meterPower={data.meter_power || 0} />
       ) : tab === 'monitor' ? (
-      <div style={{ display: 'flex', height: 'calc(100vh - 112px)' }}>
+      <div style={{ display: 'flex', height: 'calc(100vh - 112px)', position: 'relative', zIndex: 10 }}>
         {/* LEFT */}
-        <div style={{ width: 220, padding: 12, borderRight: '1px solid #1a3455', overflowY: 'auto' }}>
+        <div style={{ width: 220, padding: 12, borderRight: '1px solid rgba(1,218,243,0.12)', overflowY: 'auto' }}>
           <div style={P}>
             <div style={PT}><EnvironmentOutlined /> 今日天气</div>
             {data.weather ? (
               <div style={{ textAlign: 'center', padding: '8px 0' }}>
-                <div style={{ fontSize: 12, color: '#8ba0c0' }}>{data.weather.city}</div>
-                <div style={{ fontSize: 32, fontWeight: 700, color: '#00daf3' }}>{data.weather.temp}°C</div>
-                <div>{data.weather.text} | 湿度 {data.weather.humidity}%</div>
-                <div style={{ fontSize: 11, color: '#8ba0c0' }}>{data.weather.wind_dir} {data.weather.wind_scale}级</div>
+                <div style={{ fontSize: 12, color: 'rgba(217,229,228,0.5)', letterSpacing: '0.02em' }}>{data.weather.city}</div>
+                <div style={{ fontSize: 36, fontWeight: 700, color: '#01daf3', filter: 'drop-shadow(0 0 12px rgba(1,218,243,0.3))' }}>{data.weather.temp}°C</div>
+                <div style={{ color: 'rgba(217,229,228,0.7)', fontSize: 13 }}>{data.weather.text} | 湿度 {data.weather.humidity}%</div>
+                <div style={{ fontSize: 11, color: 'rgba(217,229,228,0.4)' }}>{data.weather.wind_dir} {data.weather.wind_scale}级</div>
               </div>
-            ) : <div style={{ textAlign: 'center', padding: 16, color: '#8ba0c0' }}>暂无天气数据</div>}
+            ) : <div style={{ textAlign: 'center', padding: 16, color: 'rgba(217,229,228,0.4)' }}>暂无天气数据</div>}
           </div>
 
           <div style={P}>
             <div style={PT}><ClockCircleOutlined /> 定时任务</div>
             {(data.tasks || []).length === 0 ? <div style={E}>暂无任务</div> : (
               (data.tasks || []).slice(0, 6).map((t: any, i: number) => (
-                <div key={i} style={{ fontSize: 11, padding: '3px 0', borderBottom: '1px solid #1a3455' }}>
-                  <span style={{ color: '#00daf3' }}>{t.time}</span> {t.device}
+                <div key={i} style={{ fontSize: 11, padding: '3px 0', borderBottom: '1px solid rgba(1,218,243,0.06)' }}>
+                  <span style={{ color: '#01daf3' }}>{t.time}</span> <span style={{ color: '#d9e5e4' }}>{t.device}</span>
                   <Tag color={t.enabled ? 'green' : 'default'} style={{ marginLeft: 4, fontSize: 10 }}>{t.enabled ? '启用' : '停用'}</Tag>
                 </div>
               ))
@@ -335,10 +337,10 @@ export default function Screen() {
             <div style={PT}><AlertOutlined /> 故障报警</div>
             {(data.alarms || []).length === 0 ? <div style={E}>无告警</div> : (
               (data.alarms || []).slice(0, 8).map((a: any, i: number) => (
-                <div key={i} style={{ fontSize: 11, padding: '3px 0', borderBottom: '1px solid #1a3455' }}>
+                <div key={i} style={{ fontSize: 11, padding: '3px 0', borderBottom: '1px solid rgba(255,180,171,0.06)' }}>
                   <Tag color={a.level === 'critical' ? 'red' : 'orange'} style={{ fontSize: 10 }}>{a.level === 'critical' ? '严重' : '警告'}</Tag>
-                  <span style={{ color: '#c0d0e0' }}>{a.device} {a.msg?.slice(0, 20)}</span>
-                  <span style={{ float: 'right', color: '#5a7a9a', fontSize: 10 }}>{a.time}</span>
+                  <span style={{ color: '#d9e5e4' }}>{a.device} {a.msg?.slice(0, 20)}</span>
+                  <span style={{ float: 'right', color: 'rgba(217,229,228,0.3)', fontSize: 10 }}>{a.time}</span>
                 </div>
               ))
             )}
@@ -351,7 +353,7 @@ export default function Screen() {
             <OneClickControl bid={bid} />
           </div>
           {!TOPO_ORDER.some(t => groups[t]?.length) ? (
-            <div style={{ color: '#5a7a9a', padding: 40 }}>暂无设备数据，请选择项目和楼宇</div>
+            <div style={{ color: 'rgba(217,229,228,0.3)', padding: 40, textAlign: 'center' }}>暂无设备数据，请选择项目和楼宇</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 36, maxWidth: 800 }}>
               {/* Row 1: 冷却塔 — 塔间距2倍(16) */}
@@ -394,23 +396,23 @@ export default function Screen() {
         </div>
 
         {/* RIGHT */}
-        <div style={{ width: 220, padding: 12, borderLeft: '1px solid #1a3455', overflowY: 'auto' }}>
+        <div style={{ width: 220, padding: 12, borderLeft: '1px solid rgba(1,218,243,0.12)', overflowY: 'auto' }}>
           <div style={P}>
             <div style={PT}><ThunderboltOutlined /> 能效概览</div>
-            <div style={S}><span>节能率</span><span style={{ color: '#52c41a', fontWeight: 700 }}>{((data.saving_rate || 0) * 100).toFixed(1)}%</span></div>
-            <div style={S}><span>节电量</span><span style={{ color: '#00daf3', fontWeight: 700 }}>{(data.power_saved || 0).toFixed(1)} kWh</span></div>
-            <div style={S}><span>节碳量</span><span style={{ color: '#13c2c2', fontWeight: 700 }}>{(data.carbon_saved || 0).toFixed(1)} kg</span></div>
-            <div style={S}><span>运行时长</span><span style={{ color: '#fa8c16', fontWeight: 700 }}>{data.running_days || 0} 天</span></div>
+            <div style={S}><span>节能率</span><span style={{ color: '#7fffd4', fontWeight: 700, filter: 'drop-shadow(0 0 4px rgba(127,255,212,0.4))' }}>{((data.saving_rate || 0) * 100).toFixed(1)}%</span></div>
+            <div style={S}><span>节电量</span><span style={{ color: '#01daf3', fontWeight: 700, filter: 'drop-shadow(0 0 4px rgba(1,218,243,0.4))' }}>{(data.power_saved || 0).toFixed(1)} kWh</span></div>
+            <div style={S}><span>节碳量</span><span style={{ color: '#84d4d3', fontWeight: 700, filter: 'drop-shadow(0 0 4px rgba(132,212,211,0.4))' }}>{(data.carbon_saved || 0).toFixed(1)} kg</span></div>
+            <div style={S}><span>运行时长</span><span style={{ color: '#95d1d0', fontWeight: 700 }}>{data.running_days || 0} 天</span></div>
           </div>
           <div style={P}>
             <div style={PT}>电能统计</div>
             {(data.meters || []).length === 0 ? <div style={E}>暂无电表</div> : (
               (data.meters || []).map((m: any, i: number) => (
-                <div key={i} style={S}><span style={{ fontSize: 11 }}>{m.name}</span><span style={{ color: '#00daf3', fontWeight: 600, fontSize: 12 }}>{m.power.toFixed(1)} kW</span></div>
+                <div key={i} style={S}><span style={{ fontSize: 11 }}>{m.name}</span><span style={{ color: '#01daf3', fontWeight: 600, fontSize: 12, filter: 'drop-shadow(0 0 3px rgba(1,218,243,0.3))' }}>{(Number(m.power) || 0).toFixed(1)} kW</span></div>
               ))
             )}
-            <div style={{ ...S, borderTop: '1px solid #1a3455', marginTop: 4, paddingTop: 4 }}>
-              <span>总电能</span><span style={{ color: '#ff4d4f', fontWeight: 700 }}>{(data.meter_power || 0).toFixed(1)} kW</span>
+            <div style={{ ...S, borderTop: '1px solid rgba(1,218,243,0.12)', marginTop: 4, paddingTop: 4 }}>
+              <span>总电能</span><span style={{ color: '#ff4d4f', fontWeight: 700 }}>{(Number(data.meter_power) || 0).toFixed(1)} kW</span>
             </div>
           </div>
         </div>
@@ -424,19 +426,20 @@ export default function Screen() {
 
       {/* Device Properties Modal */}
       <Modal
-        title={<span style={{ color: '#00daf3' }}>{devModal.dev?.name} — 设备属性</span>}
+        title={<span style={{ color: '#01daf3', filter: 'drop-shadow(0 0 4px rgba(1,218,243,0.4))' }}>{devModal.dev?.name} — 设备属性</span>}
         open={devModal.open}
         onCancel={() => setDevModal({ open: false, dev: null })}
         footer={null}
         width={500}
-        styles={{ body: { background: '#0d1f3c', padding: 16 }, header: { background: '#0d1f3c', borderBottom: '1px solid #1a3455' } }}
+        className="screen-modal"
+        styles={{ body: { padding: 16 }, header: {} }}
       >
         {propsLoading ? <Spin /> : devProps.length === 0 ? (
-          <div style={{ color: '#8ba0c0', textAlign: 'center', padding: 20 }}>该设备暂无属性配置</div>
+          <div style={{ color: 'rgba(217,229,228,0.4)', textAlign: 'center', padding: 20 }}>该设备暂无属性配置</div>
         ) : (
           devProps.map((p: any) => (
-            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #1a3455', fontSize: 13 }}>
-              <span style={{ color: '#8ba0c0', minWidth: 80 }}>{p.prop_name}</span>
+            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(1,218,243,0.08)', fontSize: 13 }}>
+              <span style={{ color: 'rgba(217,229,228,0.5)', minWidth: 80 }}>{p.prop_name}</span>
               {p.operation_type === '开关机' ? (
                 <Switch size="small" checked={p.prop_value === '开机'} checkedChildren="开机" unCheckedChildren="关机"
                   onChange={v => doControl(devModal.dev?.id, v ? 'start' : 'stop')} />
@@ -457,139 +460,10 @@ export default function Screen() {
   );
 }
 
-const P: React.CSSProperties = { background: '#0d1f3c', borderRadius: 6, padding: 10, marginBottom: 10, border: '1px solid #1a3455' };
-const PT: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: '#00daf3', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 };
-const S: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 12 };
-const E: React.CSSProperties = { textAlign: 'center', padding: 12, color: '#5a7a9a', fontSize: 12 };
-
-// TopoRow: horizontal row of devices
-function TopoRow({ items, color, onOpen, size, gap: rowGap }: { items: any[]; color: string; onOpen: (d: any) => void; size?: 'normal' | 'small' | 'large'; gap?: number }) {
-  if (!items || items.length === 0) return null;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: rowGap ?? 4, justifyContent: 'center' }}>
-        {items.map((d: any) => <TopoDevice key={d.id} d={d} color={color} onOpen={onOpen} size={size} />)}
-      </div>
-    </div>
-  );
-}
-
-// TopoCol: vertical column of devices
-function TopoCol({ items, color, onOpen, size, gap: colGap }: { items: any[]; color: string; onOpen: (d: any) => void; size?: 'normal' | 'small' | 'large'; gap?: number }) {
-  if (!items || items.length === 0) return null;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: colGap ?? 4, alignItems: 'center' }}>
-        {items.map((d: any) => <TopoDevice key={d.id} d={d} color={color} onOpen={onOpen} size={size} />)}
-      </div>
-    </div>
-  );
-}
-
-// TopoDevice: single device block
-// States: 故障(红色闪烁) | 在线+开机(亮色实心方■) | 在线+关机(暗色空心方□) | 离线+开机(灰色虚线实心圆●) | 离线+关机(灰色虚线空心圆○)
-function TopoDevice({ d, color, onOpen, size }: { d: any; color: string; onOpen: (d: any) => void; size?: 'normal' | 'small' | 'large' }) {
-  const isOnline = d.status === '在线';
-  const devStatus = d.device_status || '';
-  const isFault = devStatus === '故障';
-  const isOn = devStatus !== '关机' && devStatus !== '停机' && devStatus !== '';
-  const isSmall = size === 'small';
-  const isLarge = size === 'large';
-
-  let bg: string;
-  let border: string;
-  let opacity: number;
-  let label: string;
-  let labelColor: string;
-  let anim: string;
-  let nameColor: string;
-  let boxShadow: string;
-
-  if (isFault) {
-    bg = '#5c1a1a';
-    border = '2px solid #ff4d4f';
-    opacity = 1;
-    label = '✕';
-    labelColor = '#ff4d4f';
-    anim = 'faultPulse 1.2s ease-in-out infinite';
-    nameColor = '#fff';
-    boxShadow = '0 0 10px rgba(255,77,79,0.3)';
-  } else if (isOnline && isOn) {
-    bg = color || '#666';
-    border = '2px solid rgba(255,255,255,0.5)';
-    opacity = 1;
-    label = '■';
-    labelColor = '#fff';
-    anim = '';
-    nameColor = '#fff';
-    boxShadow = '0 0 14px rgba(255,255,255,0.2)';
-  } else if (isOnline && !isOn) {
-    bg = '#152233';
-    border = '2px solid #253a50';
-    opacity = 0.6;
-    label = '□';
-    labelColor = '#4a6a8a';
-    anim = '';
-    nameColor = '#4a6a8a';
-    boxShadow = 'none';
-  } else if (!isOnline && isOn) {
-    bg = '#3a3a3a';
-    border = '2px dashed #555';
-    opacity = 0.5;
-    label = '●';
-    labelColor = '#666';
-    anim = '';
-    nameColor = '#666';
-    boxShadow = 'none';
-  } else {
-    bg = '#222';
-    border = '2px dashed #444';
-    opacity = 0.4;
-    label = '○';
-    labelColor = '#444';
-    anim = '';
-    nameColor = '#444';
-    boxShadow = 'none';
-  }
-
-  const boxW = isLarge ? 160 : isSmall ? 44 : 56;
-  const boxH = isLarge ? 110 : isSmall ? 44 : 56;
-  const fontSize = isLarge ? 14 : isSmall ? 9 : 10;
-  const labelFontSize = isLarge ? 18 : isSmall ? 10 : 12;
-  const nameMax = isLarge ? 8 : isSmall ? 4 : 6;
-
-  return (
-    <div title={d.key_info ? d.name + ': ' + d.key_info : '点击查看属性'} onClick={() => onOpen(d)} style={{
-      width: boxW, height: boxH,
-      borderRadius: 8, cursor: 'pointer',
-      background: bg,
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      color: '#fff', fontSize, fontWeight: 600,
-      border, opacity, boxShadow,
-      animation: anim,
-      transition: 'transform 0.15s',
-    }} onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.05)')} onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}>
-      {!isLarge && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-          <span style={{
-            width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-            background: isFault ? '#ff4d4f' : isOnline && isOn ? '#7fffd4' : isOnline && !isOn ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.15)',
-            boxShadow: isFault ? '0 0 6px #ff4d4f' : isOnline && isOn ? '0 0 6px rgba(127,255,212,0.6)' : 'none',
-          }} />
-        </div>
-      )}
-      <div style={{ lineHeight: 1.2, textAlign: 'center', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: boxW - 8, color: nameColor }}>{d.name.length > nameMax ? d.name.slice(0, nameMax) + '…' : d.name}</div>
-      {isLarge && d.key_info && (() => {
-        const lines = d.key_info.split(/\s*\|\s*/).filter(Boolean);
-        return (
-          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)', marginTop: 4, lineHeight: 1.5, textAlign: 'center', maxWidth: 150 }}>
-            {lines.map((line: string, i: number) => <div key={i}>{line}</div>)}
-          </div>
-        );
-      })()}
-    </div>
-  );
-}
+const P: React.CSSProperties = { background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)', borderRadius: 10, padding: 12, marginBottom: 10, border: '1px solid rgba(1,218,243,0.2)', boxShadow: '0 8px 32px 0 rgba(0,0,0,0.2), inset 0 0 20px rgba(1,218,243,0.03)' };
+const PT: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: '#01daf3', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, textTransform: 'uppercase', letterSpacing: '0.05em', filter: 'drop-shadow(0 0 5px rgba(1,218,243,0.4))' };
+const S: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 12, color: '#d9e5e4' };
+const E: React.CSSProperties = { textAlign: 'center', padding: 16, color: 'rgba(217,229,228,0.4)', fontSize: 12 };
 
 // OneClickControl: 一键启停按钮（关联后台启停配置）
 function OneClickControl({ bid }: { bid: number }) {
@@ -648,6 +522,10 @@ function OneClickControl({ bid }: { bid: number }) {
 // NumControl: numeric value editor with set button
 function NumControl({ devId, prop, onSet }: { devId: number; prop: any; onSet: (id: number, action: string, v?: string) => void }) {
   const [val, setVal] = useState(prop.prop_value ? parseFloat(prop.prop_value) : (prop.min_value ? parseFloat(prop.min_value) : 0));
+  useEffect(() => {
+    const newVal = prop.prop_value ? parseFloat(prop.prop_value) : (prop.min_value ? parseFloat(prop.min_value) : 0);
+    setVal(newVal);
+  }, [prop.prop_value, prop.min_value]);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <InputNumber size="small" style={{ width: 100 }}

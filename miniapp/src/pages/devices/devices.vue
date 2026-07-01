@@ -16,10 +16,12 @@
   </template>
 </view></template>
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'; import { api } from '../../api/client';
+import { ref, onShow } from 'vue'; import { api } from '../../api/client';
 import { AuthError } from '../../api/client';
 const devices = ref([] as any[]), buildings = ref([] as any[]), selBuilding = ref(0), selBuildingName = ref(''), buildingNames = ref([] as string[]), loading = ref(true);
-onMounted(async () => {
+
+const fetchData = async () => {
+  loading.value = true;
   try {
     const b = await api.get('/buildings'); buildings.value = b.data as any[];
     buildingNames.value = (b.data as any[]).map((b:any) => b.name);
@@ -27,7 +29,9 @@ onMounted(async () => {
   } catch (e) { if (!(e instanceof AuthError)) uni.showToast({ title: '楼宇加载失败', icon: 'none' }) }
   await load();
   loading.value = false;
-});
+};
+
+onShow(() => { fetchData(); });
 const load = async () => {
   try {
     const path = selBuilding.value > 0 ? '/devices?building_id='+selBuilding.value : '/devices';

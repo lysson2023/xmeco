@@ -72,33 +72,56 @@ func StartExecution(ctx context.Context, pool postgres.DBTX, planID int, planNam
 }
 
 func (e *Execution) LogStep(ctx context.Context, step Step, result, responseValue, errMsg string, durationMs int) {
-	e.mu.Lock()
-	if result == "success" || result == "skip" { e.DoneSteps++ } else if result == "error" { e.Status = "error" }
-	doneSteps := e.DoneSteps
-	status := e.Status
-	e.mu.Unlock()
+	// Step log INSERT 不需要在锁内（独立记录，不影响状态一致性）
 	_, err := e.pool.Exec(ctx,
 		`INSERT INTO startup_step_log (execution_id,step_order,device_name,action,target_value,result,response_value,duration_ms,error_message) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 		e.ID, step.SortOrder, step.DeviceName, step.Action, step.TargetValue, result, responseValue, durationMs, errMsg)
 	if err != nil { slog.Warn("step log failed", "err", err) }
-	// 同步更新 DB 的 done_steps 和 status，让前端能实时看到执行进度
-	if _, err := e.pool.Exec(ctx, `UPDATE startup_execution SET done_steps=$1, status=$2 WHERE id=$3`,
-		doneSteps, status, e.ID); err != nil {
+
+	// 使用原子 UPDATE 更新 done_steps 和 status，避免 TOCTOU 竞态条件。
+	// done_steps 使用 GREATEST 确保只增不减；status 使用 CASE 确保 error 状态不会被覆盖。
+	if result == "success" || result == "skip" {
+		_, err = e.pool.Exec(ctx,
+			`UPDATE startup_execution SET done_steps = GREATEST(done_steps, done_steps + 1) WHERE id=$1`, e.ID)
+	} else if result == "error" {
+		_, err = e.pool.Exec(ctx,
+			`UPDATE startup_execution SET status = CASE WHEN status = 'completed' THEN 'completed' ELSE 'error' END WHERE id=$1`, e.ID)
+	}
+	if err != nil {
 		slog.Warn("execution progress update failed", "exec", e.ID, "err", err)
 	}
+
+	// 同步内存状态（用于 Run 循环中的 isStopped 等检查，DB 为权威源）
+	e.mu.Lock()
+	if result == "success" || result == "skip" {
+		e.DoneSteps++
+	} else if result == "error" {
+		e.Status = "error"
+	}
+	e.mu.Unlock()
 }
 
 func (e *Execution) Finish(ctx context.Context) {
+	// 同步内存状态并原子更新 DB
 	e.mu.Lock()
 	if e.Status == "running" { e.Status = "completed" }
 	status := e.Status
 	doneSteps := e.DoneSteps
 	e.mu.Unlock()
-	if _, err := e.pool.Exec(ctx, `UPDATE startup_execution SET status=$1,done_steps=$2,finished_at=$3 WHERE id=$4`,
-		status, doneSteps, time.Now(), e.ID); err != nil {
+
+	// 原子更新：仅当 DB status='running' 时设为 'completed'，防止覆盖 error/stopped 状态。
+	_, err := e.pool.Exec(ctx,
+		`UPDATE startup_execution SET status = CASE WHEN status = 'running' THEN 'completed' ELSE status END,
+		 done_steps = GREATEST(done_steps, $2),
+		 finished_at = NOW() WHERE id=$1`,
+		e.ID, doneSteps)
+	if err != nil {
 		slog.Warn("execution finish update failed", "exec", e.ID, "err", err)
 	}
-	slog.Info("execution finished", "plan", e.PlanName, "status", status)
+
+	if err == nil {
+		slog.Info("execution finished", "plan", e.PlanName, "status", status)
+	}
 }
 
 // isStopped checks if the execution has been externally marked as stopped in the DB.
@@ -112,6 +135,17 @@ func (e *Execution) isStopped(ctx context.Context) bool {
 }
 
 func (e *Execution) Run(ctx context.Context, steps []Step, execFn func(ctx context.Context, devID int, action, target string) (string, error)) {
+	if execFn == nil {
+		slog.Error("orchestrator: Run called with nil execFn")
+		e.mu.Lock()
+		e.Status = "error"
+		e.mu.Unlock()
+		// 尝试更新 DB 状态为 failed
+		if _, err := e.pool.Exec(context.Background(), `UPDATE startup_execution SET status='failed',finished_at=NOW() WHERE id=$1`, e.ID); err != nil {
+			slog.Warn("orchestrator: failed to mark execution as error after nil execFn", "exec", e.ID, "err", err)
+		}
+		return
+	}
 	defer e.Finish(ctx)
 	setStopped := func() {
 		e.mu.Lock()

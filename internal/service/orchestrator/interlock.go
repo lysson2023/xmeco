@@ -34,7 +34,11 @@ func (il *Interlock) Check(ctx context.Context, targetDeviceID int, action strin
 		err := il.pool.QueryRow(ctx,
 			`SELECT prop_value FROM device_properties WHERE device_id=$1 AND prop_name=$2 ORDER BY id LIMIT 1`,
 			checkDevID, propName).Scan(&actual)
-		if err != nil { actual = "" }
+		if err != nil {
+			// DB 查询失败时采用 fail-safe 策略：阻止操作并返回错误，而非静默放行
+			slog.Warn("interlock: property query failed, blocking for safety", "dev", checkDevID, "prop", propName, "err", err)
+			return fmt.Errorf("联锁检查异常：无法查询 %s 的 %s 属性", devName, propName)
+		}
 
 		if actual != expected {
 			if msg == "" { msg = devName + " " + propName + " 应为 " + expected + "，实际为 " + actual }

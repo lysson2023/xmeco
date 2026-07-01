@@ -1,100 +1,88 @@
-/* ===== XMECO Big Screen — Glass Design System ===== */
+/* ===== XMECO Big Screen — Glass-Cyber Design System ===== */
 
-/* Header */
-.screen-header {
-  background: rgba(23,33,33,0.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(1,218,243,0.12);
+/* ---- Base ---- */
+.screen-body {
+  background: #0b1515;
+  color: #d9e5e4;
+  font-family: 'Manrope', 'Inter', -apple-system, sans-serif;
+  min-height: 100vh;
+  position: relative;
+  overflow: hidden;
 }
 
-/* Tab bar */
+/* ---- Header ---- */
+.screen-header {
+  background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(1,218,243,0.25);
+  box-shadow: 0 8px 32px 0 rgba(0,0,0,0.2), inset 0 0 20px rgba(1,218,243,0.05);
+  position: relative;
+  z-index: 50;
+}
+
+/* ---- Tab bar ---- */
+.screen-tab-bar {
+  background: rgba(6,16,16,0.3);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(1,218,243,0.10);
+  position: relative;
+  z-index: 40;
+}
+
 .screen-tab {
-  transition: all 0.25s ease;
+  transition: all 0.3s ease;
+  cursor: pointer;
 }
 .screen-tab:hover {
   background: rgba(1,218,243,0.06);
   color: #01daf3 !important;
 }
 
-/* Monitor panels */
-.screen-panel-glass {
-  background: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(149,209,208,0.1);
-  border-radius: 10px;
-  padding: 14px;
-  margin-bottom: 10px;
-  transition: all 0.3s ease;
-}
-.screen-panel-glass:hover {
-  border-color: rgba(1,218,243,0.2);
-  box-shadow: 0 0 24px rgba(1,218,243,0.05);
-}
-
-/* Panel title */
-.screen-panel-title {
-  font-family: 'Inter', -apple-system, sans-serif;
+/* ---- Monitor Panel Title (used by ScreenMonitor.tsx) ---- */
+.screen-monitor-title {
+  font-family: 'Space Grotesk', 'Inter', -apple-system, sans-serif;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: rgba(1,218,243,0.75);
+  color: rgba(1,218,243,0.85);
   margin-bottom: 10px;
   display: flex;
   align-items: center;
   gap: 8px;
+  filter: drop-shadow(0 0 5px rgba(1,218,243,0.5));
 }
 
-/* Weather hero */
-.screen-weather-temp {
-  font-family: 'Space Grotesk', monospace;
-  font-size: 40px;
-  font-weight: 700;
-  color: #01daf3;
-  letter-spacing: -0.03em;
+/* ---- Modal Glass ---- */
+.screen-modal .ant-modal-content {
+  background: linear-gradient(135deg, rgba(11,21,21,0.95), rgba(23,33,33,0.95)) !important;
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(1,218,243,0.25) !important;
+  box-shadow: 0 8px 32px 0 rgba(0,0,0,0.4);
+}
+.screen-modal .ant-modal-header {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(1,218,243,0.12) !important;
+}
+.screen-modal .ant-modal-body {
+  background: transparent !important;
 }
 
-/* Flow lines */
-@keyframes flowDash {
-  to { stroke-dashoffset: -20; }
-}
-.screen-flow-line {
-  stroke-dasharray: 10;
-  animation: flowDash 1s linear infinite;
-  filter: drop-shadow(0 0 4px rgba(1,218,243,0.6));
-}
-
-/* Topology node enhanced */
-.screen-topo-glow-online {
-  box-shadow: 0 0 12px rgba(127,255,212,0.3), 0 4px 16px rgba(0,0,0,0.2);
-}
-.screen-topo-glow-fault {
-  box-shadow: 0 0 14px rgba(255,77,79,0.4);
+/* ---- Stagger entrance for topology rows ---- */
+.stagger-1 { animation: fadeSlideIn 0.5s ease-out both; animation-delay: 0.1s; }
+.stagger-2 { animation: fadeSlideIn 0.5s ease-out both; animation-delay: 0.2s; }
+.stagger-3 { animation: fadeSlideIn 0.5s ease-out both; animation-delay: 0.3s; }
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-/* stat row */
-.screen-stat-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 5px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
-  font-family: 'Manrope', -apple-system, sans-serif;
-  font-size: 13px;
-}
-.screen-stat-row:last-child { border-bottom: none; }
-
-/* Alerts */
-.screen-alert-panel {
-  background: linear-gradient(135deg, rgba(255,77,79,0.06), rgba(255,77,79,0.01));
-  border: 1px solid rgba(255,77,79,0.15);
-  border-radius: 10px;
-  padding: 14px;
-  margin-bottom: 10px;
-}
-
-/* Body font override */
-body.xmeco-dark {
-  font-family: 'Manrope', -apple-system, sans-serif;
+/* ---- Accessibility ---- */
+@media (prefers-reduced-motion: reduce) {
+  .screen-tab, .stagger-1, .stagger-2, .stagger-3 {
+    transition: none;
+    animation: none;
+  }
 }

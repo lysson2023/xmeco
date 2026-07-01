@@ -127,14 +127,23 @@ func (r *LogRepo) ExportTelemetryCSV(ctx context.Context, w http.ResponseWriter,
 			return err
 		}
 		for _, row := range list {
-			ts := row["ts"].(time.Time)
+			ts, ok1 := row["ts"].(time.Time)
+			metric, ok2 := row["metric"].(string)
+			avg, ok3 := row["avg"].(float64)
+			max, ok4 := row["max"].(float64)
+			min, ok5 := row["min"].(float64)
+			count, ok6 := row["count"].(int)
+			if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 || !ok6 {
+				slog.Warn("ExportTelemetryCSV: unexpected row type in agg mode")
+				continue
+			}
 			if err := wr.Write([]string{
 				ts.Format("2006-01-02 15:04:05"),
-				row["metric"].(string),
-				ftoa(row["avg"].(float64)),
-				ftoa(row["max"].(float64)),
-				ftoa(row["min"].(float64)),
-				itos(row["count"].(int)),
+				metric,
+				ftoa(avg),
+				ftoa(max),
+				ftoa(min),
+				itos(count),
 			}); err != nil {
 				return err
 			}
@@ -144,12 +153,20 @@ func (r *LogRepo) ExportTelemetryCSV(ctx context.Context, w http.ResponseWriter,
 			return err
 		}
 		for _, row := range list {
-			ts := row["ts"].(time.Time)
+			ts, ok1 := row["ts"].(time.Time)
+			metric, ok2 := row["metric"].(string)
+			value, ok3 := row["value"].(float64)
+			unit, ok4 := row["unit"].(string)
+			if !ok1 || !ok2 || !ok3 || !ok4 {
+				slog.Warn("ExportTelemetryCSV: unexpected row type in raw mode, got ts=%T metric=%T value=%T unit=%T",
+					row["ts"], row["metric"], row["value"], row["unit"])
+				continue
+			}
 			if err := wr.Write([]string{
 				ts.Format("2006-01-02 15:04:05"),
-				row["metric"].(string),
-				ftoa(row["value"].(float64)),
-				row["unit"].(string),
+				metric,
+				ftoa(value),
+				unit,
 			}); err != nil {
 				return err
 			}

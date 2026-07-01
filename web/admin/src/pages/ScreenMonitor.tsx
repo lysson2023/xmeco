@@ -1,18 +1,14 @@
 import { Tag } from 'antd';
+import { TopoRow, TopoCol } from '../components/TopoDevice';
 import { TOPO_ORDER, TOPO_COLORS } from '../utils/constants';
 
 interface Props {
   data: any;
-  bid: number;
   groups: Record<string, any[]>;
   openDevice: (d: any) => void;
 }
 
-const P: React.CSSProperties = { background: '#0d1f3c', borderRadius: 6, padding: 10, marginBottom: 10, border: '1px solid #1a3455' };
-const PT: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: '#00daf3', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 };
-const E: React.CSSProperties = { textAlign: 'center', padding: 12, color: '#5a7a9a', fontSize: 12 };
-
-export default function ScreenMonitor({ data, bid, groups, openDevice }: Props) {
+export default function ScreenMonitor({ data, groups, openDevice }: Props) {
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 106px)' }}>
       {/* LEFT SIDEBAR */}
@@ -144,7 +140,7 @@ export default function ScreenMonitor({ data, bid, groups, openDevice }: Props) 
           {(data.meters || []).length === 0 ? <div style={{ color: '#5a7a9a', textAlign: 'center', padding: 12 }}>暂无电表</div> : (
             (data.meters || []).map((m: any, i: number) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 11, color: '#bfc8c8' }}>
-                <span>{m.name}</span><span style={{ color: '#01daf3', fontWeight: 600, fontFamily: 'Space Grotesk' }}>{m.power.toFixed(1)} kW</span>
+                <span>{m.name}</span><span style={{ color: '#01daf3', fontWeight: 600, fontFamily: 'Space Grotesk' }}>{(Number(m.power) || 0).toFixed(1)} kW</span>
               </div>
             ))
           )}
@@ -155,95 +151,6 @@ export default function ScreenMonitor({ data, bid, groups, openDevice }: Props) 
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ---- Topology Components (shared with Screen.tsx) ----
-
-function TopoRow({ items, color, onOpen, size, gap: rowGap }: { items: any[]; color: string; onOpen: (d: any) => void; size?: 'normal' | 'small' | 'large'; gap?: number }) {
-  if (!items || items.length === 0) return null;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: rowGap ?? 4, justifyContent: 'center' }}>
-        {items.map((d: any) => <TopoDevice key={d.id} d={d} color={color} onOpen={onOpen} size={size} />)}
-      </div>
-    </div>
-  );
-}
-
-function TopoCol({ items, color, onOpen, size, gap: colGap }: { items: any[]; color: string; onOpen: (d: any) => void; size?: 'normal' | 'small' | 'large'; gap?: number }) {
-  if (!items || items.length === 0) return null;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: colGap ?? 4, alignItems: 'center' }}>
-        {items.map((d: any) => <TopoDevice key={d.id} d={d} color={color} onOpen={onOpen} size={size} />)}
-      </div>
-    </div>
-  );
-}
-
-function TopoDevice({ d, color, onOpen, size }: { d: any; color: string; onOpen: (d: any) => void; size?: 'normal' | 'small' | 'large' }) {
-  const isOnline = d.status === '在线';
-  const devStatus = d.device_status || '';
-  const isFault = devStatus === '故障';
-  const isOn = devStatus !== '关机' && devStatus !== '停机' && devStatus !== '';
-  const isSmall = size === 'small';
-  const isLarge = size === 'large';
-
-  let bg: string, border: string, opacity: number, label: string, labelColor: string, anim: string, nameColor: string, boxShadow: string;
-
-  if (isFault) {
-    bg = '#5c1a1a'; border = '2px solid #ff4d4f'; opacity = 1;
-    label = 'x'; labelColor = '#ff4d4f'; anim = 'faultPulse 1.2s ease-in-out infinite';
-    nameColor = '#fff'; boxShadow = '0 0 10px rgba(255,77,79,0.3)';
-  } else if (isOnline && isOn) {
-    bg = color || '#666'; border = '2px solid rgba(255,255,255,0.5)'; opacity = 1;
-    label = ''; labelColor = '#fff'; anim = '';
-    nameColor = '#fff'; boxShadow = '0 0 14px rgba(255,255,255,0.2)';
-  } else if (isOnline && !isOn) {
-    bg = '#152233'; border = '2px solid #253a50'; opacity = 0.6;
-    label = ''; labelColor = '#4a6a8a'; anim = '';
-    nameColor = '#4a6a8a'; boxShadow = 'none';
-  } else if (!isOnline && isOn) {
-    bg = '#3a3a3a'; border = '2px dashed #555'; opacity = 0.5;
-    label = ''; labelColor = '#666'; anim = '';
-    nameColor = '#666'; boxShadow = 'none';
-  } else {
-    bg = '#222'; border = '2px dashed #444'; opacity = 0.4;
-    label = ''; labelColor = '#444'; anim = '';
-    nameColor = '#444'; boxShadow = 'none';
-  }
-
-  const boxW = isLarge ? 160 : isSmall ? 44 : 56;
-  const boxH = isLarge ? 110 : isSmall ? 44 : 56;
-  const fontSize = isLarge ? 14 : isSmall ? 9 : 10;
-  const nameMax = isLarge ? 8 : isSmall ? 4 : 6;
-
-  return (
-    <div title={d.key_info ? d.name + ': ' + d.key_info : '点击查看属性'} onClick={() => onOpen(d)} style={{
-      width: boxW, height: boxH, borderRadius: 8, cursor: 'pointer',
-      background: bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      color: '#fff', fontSize, fontWeight: 600, border, opacity, boxShadow,
-      animation: anim, transition: 'transform 0.15s',
-    }} onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.05)')} onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}>
-      {!isLarge && label && <div style={{ fontSize: isSmall ? 10 : 12, color: labelColor }}>{label}</div>}
-      {/* Status dot */}
-      <div style={{ width: 5, height: 5, borderRadius: '50%', marginBottom: 2,
-        background: isFault ? '#ff4d4f' : isOnline && isOn ? '#7fffd4' : 'rgba(255,255,255,0.2)',
-        boxShadow: isFault ? '0 0 6px #ff4d4f' : isOnline && isOn ? '0 0 6px #7fffd4' : 'none',
-      }} />
-      <div style={{ lineHeight: 1.2, textAlign: 'center', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: boxW - 8, color: nameColor }}>
-        {d.name.length > nameMax ? d.name.slice(0, nameMax) + '…' : d.name}
-      </div>
-      {isLarge && d.key_info && (() => {
-        const lines = d.key_info.split(/\s*\|\s*/).filter(Boolean);
-        return (
-          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)', marginTop: 4, lineHeight: 1.5, textAlign: 'center', maxWidth: 150 }}>
-            {lines.map((line: string, i: number) => <div key={i}>{line}</div>)}
-          </div>
-        );
-      })()}
     </div>
   );
 }

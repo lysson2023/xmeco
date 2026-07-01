@@ -56,7 +56,7 @@ const loading = ref(false);
 const activeTag = `background:#006875;color:#fff;border-color:#006875;`;
 
 onMounted(async () => {
-  try { const r = await api.get('/devices'); allDevices.value = r.data as any[]; devNames.value = (r.data as any[]).map((d:any)=>d.name); } catch {}
+  try { const r = await api.get('/devices'); allDevices.value = r.data as any[]; devNames.value = (r.data as any[]).map((d:any)=>d.name); } catch (e) { if (!(e instanceof AuthError)) uni.showToast({ title: '设备列表加载失败', icon: 'none' }); }
   // Pre-select device from URL params
   const pages = getCurrentPages();
   const opts = (pages[pages.length-1] as any).options;
@@ -87,7 +87,13 @@ function onEnd(e: any) { endDate.value = e.detail.value; quick.value = 3; load()
 
 async function loadMetrics() {
   if (!selDev.value) return;
-  try { const r = await api.get('/properties?device_id='+selDev.value); metrics.value = (r.data as any) || []; metricNames.value = ['全部指标',...((r.data as any[]).map((p:any)=>p.prop_name))]; } catch (e) { if (!(e instanceof AuthError)) {} }
+  try {
+    const r = await api.get('/properties?device_id=' + encodeURIComponent(String(selDev.value)));
+    metrics.value = (r.data as any) || [];
+    metricNames.value = ['全部指标',...((r.data as any[]).map((p:any)=>p.prop_name))];
+  } catch (e) {
+    if (!(e instanceof AuthError)) { uni.showToast({ title: '指标加载失败', icon: 'none' }); }
+  }
   load();
 }
 
@@ -95,11 +101,17 @@ async function load() {
   if (!selDev.value || !startDate.value || !endDate.value) return;
   loading.value = true;
   try {
-    const params = `?device_id=${selDev.value}&start=${startDate.value}&end=${endDate.value}&interval=${selInterval.value}${selMetric.value?'&metric='+selMetric.value:''}`;
-    const r = await api.get('/logs/telemetry'+params);
+    const params = `?device_id=${encodeURIComponent(String(selDev.value))}&start=${encodeURIComponent(startDate.value)}&end=${encodeURIComponent(endDate.value)}&interval=${encodeURIComponent(selInterval.value)}${selMetric.value ? '&metric=' + encodeURIComponent(selMetric.value) : ''}`;
+    const r = await api.get('/logs/telemetry' + params);
     const data = r.data as any[];
-    list.value = (data||[]).slice(0,200);
-  } catch { list.value = []; }
+    list.value = (data || []).slice(0, 200);
+    if (data && data.length > 200) {
+      uni.showToast({ title: '已加载最近200条（共' + data.length + '条）', icon: 'none', duration: 2000 });
+    }
+  } catch (e) {
+    if (!(e instanceof AuthError)) { uni.showToast({ title: '数据加载失败', icon: 'none' }); }
+    list.value = [];
+  }
   loading.value = false;
 }
 </script>

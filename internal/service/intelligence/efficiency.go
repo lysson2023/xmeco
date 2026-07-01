@@ -168,7 +168,7 @@ func (s *Service) fetchLatestPowerMap(ctx context.Context) map[int]float64 {
 		 FROM device_telemetry
 		 WHERE metric = ANY($1)
 		 ORDER BY device_id, ts DESC`,
-		[]string{"有功功率", "active_power", "P", "功率", "总功率", "总功率因数"})
+		[]string{"有功功率", "active_power", "P", "功率", "总功率"})
 	if err != nil {
 		slog.Warn("fetchLatestPowerMap query failed", "err", err)
 		return nil

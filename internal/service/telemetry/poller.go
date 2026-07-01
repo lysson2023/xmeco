@@ -150,6 +150,12 @@ func decodeVal(data []byte, reg domain.Register) float64 {
 		switch len(data) {
 		case 1: val = float64(int8(raw)) / mag
 		case 2: val = float64(int16(raw)) / mag
+		case 3:
+			// 3-byte signed: sign-extend by checking MSB of the 24-bit value
+			if raw&0x800000 != 0 {
+				raw |= 0xFFFFFFFFFF000000 // sign-extend to 64-bit
+			}
+			val = float64(int32(raw)) / mag
 		case 4: val = float64(int32(raw)) / mag
 		}
 	}

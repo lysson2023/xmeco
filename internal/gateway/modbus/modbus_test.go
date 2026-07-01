@@ -178,14 +178,14 @@ func TestBuildWriteCommand(t *testing.T) {
 			wantFC:   0x06,
 		},
 		{
-			name:     "写多个线圈(0F)实际输出func=10",
+			name:     "写多个线圈(0F)",
 			devAddr:  0x02,
 			funcCode: 0x0F,
 			addr:     0x0010,
 			count:    1,
 			value:    0xFF00,
-			wantLen:  11,
-			wantFC:   0x10, // BuildWriteMultiCommand 硬编码 0x10
+			wantLen:  10, // 9 + ceil(1/8) = 9 + 1 = 10
+			wantFC:   0x0F,
 		},
 	}
 
@@ -215,43 +215,55 @@ func TestBuildWriteCommand(t *testing.T) {
 
 func TestBuildWriteMultiCommand(t *testing.T) {
 	tests := []struct {
-		name    string
-		devAddr byte
-		addr    uint16
-		count   uint16
-		data    []byte
-		wantLen int
+		name     string
+		devAddr  byte
+		funcCode byte
+		addr     uint16
+		count    uint16
+		data     []byte
+		wantLen  int
+		wantFC   byte
 	}{
 		{
-			name:    "G-10 写多个寄存器含数据",
-			devAddr: 0x01,
-			addr:    0x0000,
-			count:   2,
-			data:    []byte{0x00, 0x01, 0x00, 0x02},
-			wantLen: 13, // 9 + 4
+			name:     "G-10 写多个寄存器含数据(10)",
+			devAddr:  0x01,
+			funcCode: 0x10,
+			addr:     0x0000,
+			count:    2,
+			data:     []byte{0x00, 0x01, 0x00, 0x02},
+			wantLen:  13, // 9 + 4
+			wantFC:   0x10,
 		},
 		{
-			name:    "单个寄存器",
-			devAddr: 0x01,
-			addr:    0x0010,
-			count:   1,
-			data:    []byte{0x12, 0x34},
-			wantLen: 11, // 9 + 2
+			name:     "单个寄存器(10)",
+			devAddr:  0x01,
+			funcCode: 0x10,
+			addr:     0x0010,
+			count:    1,
+			data:     []byte{0x12, 0x34},
+			wantLen:  11, // 9 + 2
+			wantFC:   0x10,
+		},
+		{
+			name:     "写多个线圈(0F)",
+			devAddr:  0x02,
+			funcCode: 0x0F,
+			addr:     0x0000,
+			count:    8,
+			data:     []byte{0xFF},
+			wantLen:  10, // 9 + 1
+			wantFC:   0x0F,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := BuildWriteMultiCommand(tt.devAddr, tt.addr, tt.count, tt.data)
+			cmd := BuildWriteMultiCommand(tt.devAddr, tt.funcCode, tt.addr, tt.count, tt.data)
 			if len(cmd) != tt.wantLen {
 				t.Fatalf("len = %d, want %d", len(cmd), tt.wantLen)
 			}
-			if cmd[1] != 0x10 {
-				t.Errorf("funcCode = %02X, want 0x10", cmd[1])
-			}
-			// byteCount field = count * 2
-			if cmd[6] != byte(int(tt.count)*2) {
-				t.Errorf("byteCount = %d, want %d", cmd[6], int(tt.count)*2)
+			if cmd[1] != tt.wantFC {
+				t.Errorf("funcCode = %02X, want %02X", cmd[1], tt.wantFC)
 			}
 			// Verify CRC
 			dataPart := cmd[:len(cmd)-2]

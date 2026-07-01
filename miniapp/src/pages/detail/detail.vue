@@ -1,12 +1,16 @@
 ﻿<template><view class="detail">
-  <view class="head"><text class="name">{{dev.name}}</text><text class="type">{{dev.device_type}}</text></view>
-  <view class="props" v-for="p in props" :key="p.id">
-    <text class="pn">{{p.prop_name}}</text><text class="pv">{{p.prop_value}} {{p.unit}}</text>
-  </view>
-  <view class="controls">
-    <button class="ctrl on" :disabled="controlling" @click="confirmControl('start')">{{ controlling ? '发送中...' : '启动' }}</button>
-    <button class="ctrl off" :disabled="controlling" @click="confirmControl('stop')">{{ controlling ? '发送中...' : '停止' }}</button>
-  </view>
+  <view class="loading" v-if="loading">加载中...</view>
+  <view class="error" v-else-if="loadError">{{loadError}}<button class="retry" @click="fetchDetail">重试</button></view>
+  <template v-else-if="dev.id">
+    <view class="head"><text class="name">{{dev.name}}</text><text class="type">{{dev.device_type}}</text></view>
+    <view class="props" v-for="p in props" :key="p.id">
+      <text class="pn">{{p.prop_name}}</text><text class="pv">{{p.prop_value}} {{p.unit}}</text>
+    </view>
+    <view class="controls">
+      <button class="ctrl on" :disabled="controlling" @click="confirmControl('start')">{{ controlling ? '发送中...' : '启动' }}</button>
+      <button class="ctrl off" :disabled="controlling" @click="confirmControl('stop')">{{ controlling ? '发送中...' : '停止' }}</button>
+    </view>
+  </template>
   <!-- 确认弹窗 -->
   <view class="modal-mask" v-if="showConfirm" @click="showConfirm=false">
     <view class="modal-box" @click.stop>
@@ -26,14 +30,37 @@ const dev = ref({} as any); const props = ref([] as any[])
 const controlling = ref(false)
 const showConfirm = ref(false)
 const confirmAction = ref('')
-onMounted(async () => {
-  const pages = getCurrentPages(); const id = (pages[pages.length-1] as any).options?.id
-  if (!id) { uni.showToast({ title: '设备ID无效', icon: 'none' }); return }
+const loading = ref(true)
+const loadError = ref('')
+
+const fetchDetail = async () => {
+  loading.value = true; loadError.value = '';
+  const pages = getCurrentPages();
+  if (!pages.length) { loadError.value = '页面参数错误'; loading.value = false; return; }
+  const id = (pages[pages.length-1] as any).options?.id
+  if (!id) { loadError.value = '缺少设备ID'; loading.value = false; return; }
   try {
-    const [d, p] = await Promise.all([api.get('/devices/'+id), api.get('/properties?device_id='+id)])
-    dev.value = d.data as any; props.value = (p.data as any) || []
-  } catch (e) { if (!(e instanceof AuthError)) uni.showToast({ title: '加载失败', icon: 'none' }) }
-})
+    const [d, p] = await Promise.allSettled([
+      api.get('/devices/' + encodeURIComponent(id)),
+      api.get('/properties?device_id=' + encodeURIComponent(id))
+    ]);
+    if (d.status === 'fulfilled') {
+      dev.value = d.value.data as any;
+    } else {
+      loadError.value = '设备信息加载失败';
+    }
+    if (p.status === 'fulfilled') {
+      props.value = (p.value.data || []) as any[];
+    }
+  } catch (e: any) {
+    if (!(e instanceof AuthError)) {
+      loadError.value = e?.message || '加载失败';
+    }
+  }
+  loading.value = false;
+};
+
+onMounted(() => { fetchDetail(); });
 const confirmControl = (a: string) => {
   confirmAction.value = a
   showConfirm.value = true
@@ -45,7 +72,9 @@ const doControl = async () => {
     uni.showToast({ title: '已发送', icon: 'success' })
     showConfirm.value = false
   } catch (e: any) {
-    uni.showToast({ title: e?.message || '发送失败', icon: 'none' })
+    if (!(e instanceof AuthError)) {
+      uni.showToast({ title: e?.message || '发送失败', icon: 'none' })
+    }
   } finally {
     controlling.value = false
   }

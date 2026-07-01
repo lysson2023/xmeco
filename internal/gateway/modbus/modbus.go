@@ -55,21 +55,38 @@ func BuildWriteSingleCommand(devAddr byte, funcCode byte, addr uint16, value uin
 	return buf
 }
 
-// BuildWriteMultiCommand builds func 10 - write multiple registers
-func BuildWriteMultiCommand(devAddr byte, addr uint16, count uint16, data []byte) []byte {
-	dataLen := int(count) * 2
-	buf := make([]byte, 9+dataLen)
+// BuildWriteMultiCommand builds func 0x0F (write multiple coils) or 0x10 (write multiple registers).
+// funcCode must be 0x0F or 0x10. For 0x0F, data is packed as bits (1 bit per coil); count is the number of coils.
+// For 0x10, data is register values (2 bytes per register); count is the number of registers.
+func BuildWriteMultiCommand(devAddr byte, funcCode byte, addr uint16, count uint16, data []byte) []byte {
+	var dataLenBytes int
+	var bufLen int
+	if funcCode == 0x0F {
+		// Write Multiple Coils: dataLen is in bytes (ceil(count/8))
+		dataLenBytes = (int(count) + 7) / 8
+		bufLen = 9 + dataLenBytes
+	} else {
+		// Write Multiple Registers (0x10): dataLen is count * 2
+		dataLenBytes = int(count) * 2
+		bufLen = 9 + dataLenBytes
+	}
+	buf := make([]byte, bufLen)
 	buf[0] = devAddr
-	buf[1] = 0x10
+	buf[1] = funcCode
 	buf[2] = byte(addr >> 8)
 	buf[3] = byte(addr)
 	buf[4] = byte(count >> 8)
 	buf[5] = byte(count)
-	buf[6] = byte(dataLen)
-	copy(buf[7:], data)
-	crc := CRC16(buf[:7+dataLen])
-	buf[7+dataLen] = byte(crc)
-	buf[8+dataLen] = byte(crc >> 8)
+	buf[6] = byte(dataLenBytes)
+	// 只拷贝 min(len(data), dataLenBytes) 防止溢出
+	copyLen := len(data)
+	if copyLen > dataLenBytes {
+		copyLen = dataLenBytes
+	}
+	copy(buf[7:], data[:copyLen])
+	crc := CRC16(buf[:7+dataLenBytes])
+	buf[7+dataLenBytes] = byte(crc)
+	buf[8+dataLenBytes] = byte(crc >> 8)
 	return buf
 }
 
@@ -89,7 +106,7 @@ func ParseResponse(raw []byte) ([]byte, bool) {
 		byteCount := int(raw[2])
 		if len(raw) < 5+byteCount { return nil, false }
 		return raw[3 : 3+byteCount], true
-	case 0x05, 0x06:
+	case 0x05, 0x06, 0x0F:
 		return raw[2:6], true
 	case 0x10:
 		if len(raw) < 8 { return nil, false }
@@ -123,13 +140,21 @@ func CodeFromStr(s string) byte {
 }
 
 // BuildWriteCommand builds a Modbus write command based on the function code.
-// value is the register value to write (e.g., 0xFF00 for ON, 0x0000 for OFF).
+// For 0x05/0x06 (single coil/register): value is the 16-bit value to write.
+// For 0x0F/0x10 (multiple coils/registers): value is written count times;
+// use BuildWriteMultiCommand directly if you need per-register data.
 func BuildWriteCommand(devAddr byte, funcCode byte, addr uint16, count uint16, value uint16) []byte {
 	switch funcCode {
 	case 0x05, 0x06:
 		return BuildWriteSingleCommand(devAddr, funcCode, addr, value)
 	case 0x10, 0x0F:
-		return BuildWriteMultiCommand(devAddr, addr, count, []byte{byte(value >> 8), byte(value)})
+		// Construct data array: repeat the 16-bit value count times
+		data := make([]byte, int(count)*2)
+		for i := uint16(0); i < count; i++ {
+			data[i*2] = byte(value >> 8)
+			data[i*2+1] = byte(value)
+		}
+		return BuildWriteMultiCommand(devAddr, funcCode, addr, count, data)
 	default:
 		// Unknown function code: fall back to write single register (0x06)
 		return BuildWriteSingleCommand(devAddr, 0x06, addr, value)

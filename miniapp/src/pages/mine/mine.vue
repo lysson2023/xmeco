@@ -8,19 +8,36 @@
   </template>
 </view></template>
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onShow } from 'vue';
 import { api, clearToken } from '../../api/client';
 import { AuthError } from '../../api/client';
 const userName = ref(''), roleName = ref(''), loading = ref(true);
-onMounted(async () => {
+
+const fetchUserInfo = async () => {
+  loading.value = true;
   try {
     const r = await api.get('/auth/me');
     const d = r.data as any;
     userName.value = d.username || '未登录';
     roleName.value = d.role_name || d.role || '';
-  } catch (e) { if (!(e instanceof AuthError)) {} } finally { loading.value = false }
-});
-const logout = () => { clearToken(); uni.reLaunch({ url: '/pages/login/login' }) }
+  } catch (e) {
+    if (!(e instanceof AuthError)) {
+      uni.showToast({ title: '用户信息加载失败', icon: 'none' });
+    }
+  } finally { loading.value = false }
+};
+
+onShow(() => { fetchUserInfo(); });
+
+const confirmLogout = () => {
+  uni.showModal({
+    title: '退出登录',
+    content: '确定要退出登录吗？',
+    success: (res) => { if (res.confirm) { clearToken(); uni.reLaunch({ url: '/pages/login/login' }) } }
+  });
+};
+// Keep original logout reference for template compatibility
+const logout = confirmLogout;
 </script>
 <style>
 .mine { padding: 20rpx; }

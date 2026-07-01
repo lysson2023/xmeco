@@ -14,8 +14,12 @@
 
 /* 颜色变量 */
 
+/* XMECO 品牌色 */
+$xmeco-primary: #006875;
+$xmeco-primary-light: #008899;
+
 /* 行为相关颜色 */
-$uni-color-primary: #007aff;
+$uni-color-primary: $xmeco-primary;
 $uni-color-success: #4cd964;
 $uni-color-warning: #f0ad4e;
 $uni-color-error: #dd524d;
