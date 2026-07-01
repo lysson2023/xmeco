@@ -1,4 +1,4 @@
-﻿package telemetry
+package telemetry
 
 import (
 	"context"
@@ -57,6 +57,7 @@ func (p *Poller) PollDevice(ctx context.Context, gw *gateway.Gateway, dev gatewa
 		fc := modbus.CodeFromStr(reg.ReadCode)
 		// Write-only codes used as read_code → fall back to 03 (Read Holding Registers)
 		if fc == 0x05 || fc == 0x06 || fc == 0x0F || fc == 0x10 {
+			slog.Warn("write function code used as read_code, falling back to 0x03", "dev", dev.DeviceID, "register_id", reg.ID, "read_code", reg.ReadCode)
 			fc = 0x03
 		}
 		mb := modbus.BuildReadCommand(dev.DeviceNo, fc, uint16(reg.ReadAddr), uint16(reg.DataLength))
@@ -71,7 +72,7 @@ func (p *Poller) PollDevice(ctx context.Context, gw *gateway.Gateway, dev gatewa
 
 		// Update device status from status_code mapping (e.g. "01=运行,02=停机")
 		if reg.StatusCode != nil && *reg.StatusCode != "" {
-			if statusLabel, ok := parseStatusMapping(*reg.StatusCode, val); ok {
+			if statusLabel, found := parseStatusMapping(*reg.StatusCode, val); found {
 				if _, err := p.pool.Exec(ctx, `UPDATE device SET device_status=$1 WHERE id=$2`, statusLabel, dev.DeviceID); err != nil {
 					slog.Warn("update device_status failed", "dev", dev.DeviceID, "err", err)
 				}
@@ -108,7 +109,9 @@ func (p *Poller) PollDevice(ctx context.Context, gw *gateway.Gateway, dev gatewa
 
 		// Evaluate alarm rules for each metric
 		for _, pt := range points {
-			p.alarm.Evaluate(ctx, pt.DeviceID, dev.DeviceName, dev.DeviceType, pt.Metric, pt.Value)
+			if err := p.alarm.Evaluate(ctx, pt.DeviceID, dev.DeviceName, dev.DeviceType, pt.Metric, pt.Value); err != nil {
+				slog.Error("alarm evaluate failed", "dev", dev.DeviceID, "metric", pt.Metric, "err", err)
+			}
 		}
 	}
 	return nil
@@ -137,11 +140,17 @@ func decodeVal(data []byte, reg domain.Register) float64 {
 	}
 	// Apply bit mask (e.g. "0001" extracts LSB, "00FF" extracts low byte)
 	raw = applyMask(raw, reg.DataMask)
-	val := float64(raw) / reg.Magnification
+	// 防止除零：Magnification 为 0 或负数时视为 1（Raw 值不缩放）
+	mag := reg.Magnification
+	if mag <= 0 {
+		mag = 1
+	}
+	val := float64(raw) / mag
 	if isSigned(dt) {
 		switch len(data) {
-		case 2: val = float64(int16(raw)) / reg.Magnification
-		case 4: val = float64(int32(raw)) / reg.Magnification
+		case 1: val = float64(int8(raw)) / mag
+		case 2: val = float64(int16(raw)) / mag
+		case 4: val = float64(int32(raw)) / mag
 		}
 	}
 	return math.Round(val*1000) / 1000
@@ -164,10 +173,11 @@ func reorderForOrder(data []byte, order string) []byte {
 			out[i], out[i+1] = out[i+1], out[i]
 		}
 	case "低字在前":
-		// Reverse 16-bit words (for 32-bit/4-byte values)
-		if len(out) >= 4 {
-			out[0], out[2] = out[2], out[0]
-			out[1], out[3] = out[3], out[1]
+		// Reverse 16-bit words for multi-register values
+		// Swap word pairs: [Hi,Hi,Lo,Lo] → [Lo,Lo,Hi,Hi] for each 32-bit group
+		for i := 0; i+3 < len(out); i += 4 {
+			out[i], out[i+2] = out[i+2], out[i]
+			out[i+1], out[i+3] = out[i+3], out[i+1]
 		}
 	}
 	return out
@@ -213,7 +223,16 @@ func isSigned(dt string) bool {
 // parseStatusMapping parses a status_code string like "01=运行,02=停机,03=故障"
 // and returns the label matching the raw register value (converted to hex).
 func parseStatusMapping(statusCode string, rawVal float64) (string, bool) {
-	hexKey := fmt.Sprintf("%02X", int(rawVal))
+	// Protect against negative values (sensor fault codes) —
+	// clamp to 0..255 before hex conversion.
+	intVal := int(math.Round(rawVal))
+	if intVal < 0 {
+		intVal = 0
+	}
+	if intVal > 255 {
+		intVal = 255
+	}
+	hexKey := fmt.Sprintf("%02X", intVal)
 	for _, pair := range strings.Split(statusCode, ",") {
 		kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
 		if len(kv) == 2 && strings.EqualFold(kv[0], hexKey) {

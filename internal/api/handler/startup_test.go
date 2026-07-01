@@ -10,6 +10,7 @@ import (
 	"github.com/pashagolub/pgxmock/v4"
 
 	"xmeco/internal/api/middleware"
+	"xmeco/internal/repository/postgres"
 	"xmeco/internal/service/auth"
 )
 
@@ -36,7 +37,7 @@ func TestStartupHandler_Execute(t *testing.T) {
 		WithArgs(1, "夏季开机计划", "admin", 1, pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(100))
 
-	h := NewStartupHandler(mock)
+	h := NewStartupHandler(postgres.NewStartupRepo(mock), mock)
 	claims := &auth.Claims{UserID: 1, Username: "admin", RoleCode: "super_admin"}
 	ctx := context.WithValue(t.Context(), middleware.CtxClaims, claims)
 	req := httptest.NewRequest("POST", "/api/v1/startup-plans/1/execute", nil)
@@ -70,7 +71,7 @@ func TestStartupHandler_Execute_Unauthenticated(t *testing.T) {
 		WithArgs(1).
 		WillReturnRows(pgxmock.NewRows([]string{"sort_order", "device_id", "name", "action", "target_value", "wait_seconds", "skip_if_offline", "retry_count"}))
 
-	h := NewStartupHandler(mock)
+	h := NewStartupHandler(postgres.NewStartupRepo(mock), mock)
 	req := httptest.NewRequest("POST", "/api/v1/startup-plans/1/execute", nil)
 	req.SetPathValue("id", "1")
 	rec := httptest.NewRecorder()
@@ -93,7 +94,7 @@ func TestStartupHandler_Execute_PlanNotFound(t *testing.T) {
 		WithArgs(999).
 		WillReturnError(errors.New("no rows"))
 
-	h := NewStartupHandler(mock)
+	h := NewStartupHandler(postgres.NewStartupRepo(mock), mock)
 	req := httptest.NewRequest("POST", "/api/v1/startup-plans/999/execute", nil)
 	req.SetPathValue("id", "999")
 	rec := httptest.NewRecorder()
@@ -129,7 +130,7 @@ func TestStartupHandler_RunDueScheduledTasks_Weekly(t *testing.T) {
 		WithArgs("success", 10).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
-	h := NewStartupHandler(mock)
+	h := NewStartupHandler(postgres.NewStartupRepo(mock), mock)
 	h.RunDueScheduledTasks(context.Background())
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -162,7 +163,7 @@ func TestStartupHandler_RunDueScheduledTasks_Once(t *testing.T) {
 		WithArgs("success", 11).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
-	h := NewStartupHandler(mock)
+	h := NewStartupHandler(postgres.NewStartupRepo(mock), mock)
 	h.RunDueScheduledTasks(context.Background())
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -191,7 +192,7 @@ func TestStartupHandler_RunDueScheduledTasks_ExecuteFailed(t *testing.T) {
 		WithArgs("failed", 12).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
-	h := NewStartupHandler(mock)
+	h := NewStartupHandler(postgres.NewStartupRepo(mock), mock)
 	h.RunDueScheduledTasks(context.Background())
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -211,7 +212,7 @@ func TestStartupHandler_RunDueScheduledTasks_Empty(t *testing.T) {
 	mock.ExpectQuery("SELECT st\\.id, st\\.device_id, st\\.action_type").
 		WillReturnRows(pgxmock.NewRows([]string{"id", "device_id", "action_type", "target_value", "device_name"}))
 
-	h := NewStartupHandler(mock)
+	h := NewStartupHandler(postgres.NewStartupRepo(mock), mock)
 	h.RunDueScheduledTasks(context.Background())
 
 	if err := mock.ExpectationsWereMet(); err != nil {

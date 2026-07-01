@@ -12,14 +12,14 @@ import { api } from '../api/screenClient';
 const CYAN = '#00daf3';
 const ORANGE = '#fa8c16';
 const RED = '#ff4d4f';
-const AXIS_COLOR = '#5a7a9a';
-const GRID_COLOR = '#1a3455';
+const AXIS_COLOR = '#5a7575';
+const GRID_COLOR = '#1a3535';
 
 // ---- Power-related metric keywords ----
 const POWER_KEYWORDS = ['power', 'energy', 'kwh', '功率', '电量', '电度', '有功', '电能'];
 
 const darkCard: React.CSSProperties = {
-  background: '#0d1f3c', borderRadius: 6, padding: 16, border: '1px solid #1a3455',
+  background: '#0d2525', borderRadius: 6, padding: 16, border: '1px solid #1a3535',
 };
 
 const sectionTitle: React.CSSProperties = {
@@ -305,17 +305,13 @@ export default function ScreenDecisionCenter({ bid, devices }: ScreenDecisionCen
   const chartGrid = { stroke: GRID_COLOR, strokeDasharray: '3 3' };
   const xAxisProps = { tick: { fill: AXIS_COLOR, fontSize: 11 }, axisLine: { stroke: GRID_COLOR }, tickLine: false };
   const yAxisProps = { tick: { fill: AXIS_COLOR, fontSize: 11 }, axisLine: { stroke: GRID_COLOR }, tickLine: false };
-  const tooltipStyle = { contentStyle: { background: '#0d1f3c', border: '1px solid #1a3455', borderRadius: 4, color: '#c0d0e0' } };
+  const tooltipStyle = { contentStyle: { background: '#0d2525', border: '1px solid #1a3535', borderRadius: 4, color: '#d9e5e4' } };
 
   // ==================== Empty state ====================
   if (!bid) {
     return (
       <div style={{ padding: 16, height: 'calc(100vh - 112px)', overflowY: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <ThunderboltOutlined style={{ color: '#00daf3', fontSize: 18 }} />
-          <span style={{ fontSize: 16, fontWeight: 700, color: '#00daf3' }}>决策中心</span>
-        </div>
-        <div style={{ textAlign: 'center', padding: 80, color: '#5a7a9a' }}>
+        <div style={{ textAlign: 'center', padding: 80, color: '#5a7575' }}>
           <ThunderboltOutlined style={{ fontSize: 48, marginBottom: 12, display: 'block' }} />
           请先选择项目与楼宇
         </div>
@@ -325,19 +321,13 @@ export default function ScreenDecisionCenter({ bid, devices }: ScreenDecisionCen
 
   return (
     <div style={{ padding: 16, height: 'calc(100vh - 112px)', overflowY: 'auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <ThunderboltOutlined style={{ color: '#00daf3', fontSize: 18 }} />
-        <span style={{ fontSize: 16, fontWeight: 700, color: '#00daf3' }}>决策中心</span>
-      </div>
-
       {/* Sub-tabs */}
-      <div style={{ display: 'flex', background: '#0d1f3c', borderRadius: 6, marginBottom: 16, border: '1px solid #1a3455', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', background: '#0d2525', borderRadius: 6, marginBottom: 16, border: '1px solid #1a3535', overflow: 'hidden' }}>
         {SUB_TABS.map(t => (
           <div key={t.key} onClick={() => setSubTab(t.key as any)} style={{
             padding: '8px 20px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-            background: subTab === t.key ? '#152d50' : 'transparent',
-            color: subTab === t.key ? '#00daf3' : '#8ba0c0',
+            background: subTab === t.key ? '#152d2d' : 'transparent',
+            color: subTab === t.key ? '#00daf3' : 'rgba(255,255,255,0.4)',
             borderBottom: subTab === t.key ? '2px solid #00daf3' : '2px solid transparent',
             fontWeight: subTab === t.key ? 700 : 400, fontSize: 13,
           }}>{t.icon} {t.label}</div>
@@ -350,7 +340,7 @@ export default function ScreenDecisionCenter({ bid, devices }: ScreenDecisionCen
           {/* Metric selector */}
           {powerMetrics.length > 0 && (
             <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: '#8ba0c0', fontSize: 12 }}>电量指标:</span>
+              <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>电量指标:</span>
               {powerMetrics.map(m => (
                 <Tag key={m} color={selectedMetric === m ? 'cyan' : undefined}
                   style={{ cursor: 'pointer', fontSize: 11 }}
@@ -361,7 +351,7 @@ export default function ScreenDecisionCenter({ bid, devices }: ScreenDecisionCen
             </div>
           )}
           {powerMetrics.length === 0 && !intradayLoading && (
-            <div style={{ marginBottom: 12, color: '#5a7a9a', fontSize: 12 }}>
+            <div style={{ marginBottom: 12, color: '#5a7575', fontSize: 12 }}>
               未检测到电量指标，请确认设备已配置电量相关属性（如 power、energy、功率、电量 等）
             </div>
           )}
@@ -371,21 +361,21 @@ export default function ScreenDecisionCenter({ bid, devices }: ScreenDecisionCen
             <div style={sectionTitle}><ThunderboltOutlined /> 日内用电量走势对比</div>
             <div style={{ display: 'flex', gap: 16, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ color: '#8ba0c0', fontSize: 12 }}>基准日:</span>
+                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>基准日:</span>
                 <DatePicker size="small" value={baseDate} onChange={(v: any) => v && setBaseDate(v)}
-                  style={{ background: '#0d1f3c', border: '1px solid #1a3455' }} format="YYYY-MM-DD" />
+                  style={{ background: '#0d2525', border: '1px solid #1a3535' }} format="YYYY-MM-DD" />
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ color: '#8ba0c0', fontSize: 12 }}>对比日:</span>
+                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>对比日:</span>
                 <DatePicker size="small" value={compareDate} onChange={(v: any) => v && setCompareDate(v)}
-                  style={{ background: '#0d1f3c', border: '1px solid #1a3455' }} format="YYYY-MM-DD" />
+                  style={{ background: '#0d2525', border: '1px solid #1a3535' }} format="YYYY-MM-DD" />
               </div>
-              <span style={{ color: '#5a7a9a', fontSize: 11, cursor: 'pointer' }} onClick={fetchIntraday}>刷新</span>
+              <span style={{ color: '#5a7575', fontSize: 11, cursor: 'pointer' }} onClick={fetchIntraday}>刷新</span>
             </div>
             {intradayLoading ? (
               <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
             ) : intradayData.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 40, color: '#5a7a9a' }}>暂无数据</div>
+              <div style={{ textAlign: 'center', padding: 40, color: '#5a7575' }}>暂无数据</div>
             ) : (
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={intradayData}>
@@ -393,7 +383,7 @@ export default function ScreenDecisionCenter({ bid, devices }: ScreenDecisionCen
                   <XAxis dataKey="hour" {...xAxisProps} />
                   <YAxis {...yAxisProps} label={{ value: '用电量(KWH)', angle: -90, position: 'insideLeft', fill: AXIS_COLOR, fontSize: 11, dx: -10 }} />
                   <Tooltip {...tooltipStyle} />
-                  <Legend wrapperStyle={{ color: '#8ba0c0', fontSize: 12 }} />
+                  <Legend wrapperStyle={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }} />
                   <Line type="monotone" dataKey={baseDate.format('YYYY-MM-DD')} stroke={CYAN} strokeWidth={2} dot={false} name={`基准日 ${baseDate.format('MM-DD')}`} />
                   <Line type="monotone" dataKey={compareDate.format('YYYY-MM-DD')} stroke={ORANGE} strokeWidth={2} dot={false} name={`对比日 ${compareDate.format('MM-DD')} `} />
                 </LineChart>
@@ -408,17 +398,17 @@ export default function ScreenDecisionCenter({ bid, devices }: ScreenDecisionCen
               <Radio.Group value={dailyPeriod} onChange={e => setDailyPeriod(e.target.value)} size="small" optionType="button">
                 {PERIODS.map(p => (
                   <Radio.Button key={p.value} value={p.value} style={{
-                    background: dailyPeriod === p.value ? '#152d50' : '#0d1f3c',
-                    borderColor: '#1a3455', color: dailyPeriod === p.value ? '#00daf3' : '#8ba0c0', fontSize: 11,
+                    background: dailyPeriod === p.value ? '#152d2d' : '#0d2525',
+                    borderColor: '#1a3535', color: dailyPeriod === p.value ? '#00daf3' : 'rgba(255,255,255,0.4)', fontSize: 11,
                   }}>{p.label}</Radio.Button>
                 ))}
               </Radio.Group>
-              <span style={{ color: '#5a7a9a', fontSize: 11, cursor: 'pointer' }} onClick={fetchDaily}>刷新</span>
+              <span style={{ color: '#5a7575', fontSize: 11, cursor: 'pointer' }} onClick={fetchDaily}>刷新</span>
             </div>
             {dailyLoading ? (
               <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
             ) : dailyData.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 40, color: '#5a7a9a' }}>暂无数据</div>
+              <div style={{ textAlign: 'center', padding: 40, color: '#5a7575' }}>暂无数据</div>
             ) : (
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={dailyData}>
@@ -444,17 +434,17 @@ export default function ScreenDecisionCenter({ bid, devices }: ScreenDecisionCen
               <Radio.Group value={faultPeriod} onChange={e => setFaultPeriod(e.target.value)} size="small" optionType="button">
                 {PERIODS.map(p => (
                   <Radio.Button key={p.value} value={p.value} style={{
-                    background: faultPeriod === p.value ? '#152d50' : '#0d1f3c',
-                    borderColor: '#1a3455', color: faultPeriod === p.value ? '#00daf3' : '#8ba0c0', fontSize: 11,
+                    background: faultPeriod === p.value ? '#152d2d' : '#0d2525',
+                    borderColor: '#1a3535', color: faultPeriod === p.value ? '#00daf3' : 'rgba(255,255,255,0.4)', fontSize: 11,
                   }}>{p.label}</Radio.Button>
                 ))}
               </Radio.Group>
-              <span style={{ color: '#5a7a9a', fontSize: 11, cursor: 'pointer' }} onClick={fetchFaults}>刷新</span>
+              <span style={{ color: '#5a7575', fontSize: 11, cursor: 'pointer' }} onClick={fetchFaults}>刷新</span>
             </div>
             {faultLoading ? (
               <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
             ) : faultTrendData.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 40, color: '#5a7a9a' }}>暂无故障记录</div>
+              <div style={{ textAlign: 'center', padding: 40, color: '#5a7575' }}>暂无故障记录</div>
             ) : (
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={faultTrendData}>
@@ -475,17 +465,17 @@ export default function ScreenDecisionCenter({ bid, devices }: ScreenDecisionCen
               <Radio.Group value={faultPeriod} onChange={e => setFaultPeriod(e.target.value)} size="small" optionType="button">
                 {PERIODS.map(p => (
                   <Radio.Button key={p.value} value={p.value} style={{
-                    background: faultPeriod === p.value ? '#152d50' : '#0d1f3c',
-                    borderColor: '#1a3455', color: faultPeriod === p.value ? '#00daf3' : '#8ba0c0', fontSize: 11,
+                    background: faultPeriod === p.value ? '#152d2d' : '#0d2525',
+                    borderColor: '#1a3535', color: faultPeriod === p.value ? '#00daf3' : 'rgba(255,255,255,0.4)', fontSize: 11,
                   }}>{p.label}</Radio.Button>
                 ))}
               </Radio.Group>
-              <span style={{ color: '#5a7a9a', fontSize: 11, cursor: 'pointer' }} onClick={fetchFaults}>刷新</span>
+              <span style={{ color: '#5a7575', fontSize: 11, cursor: 'pointer' }} onClick={fetchFaults}>刷新</span>
             </div>
             {faultLoading ? (
               <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
             ) : faultClassData.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 40, color: '#5a7a9a' }}>暂无故障记录</div>
+              <div style={{ textAlign: 'center', padding: 40, color: '#5a7575' }}>暂无故障记录</div>
             ) : (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={faultClassData}>

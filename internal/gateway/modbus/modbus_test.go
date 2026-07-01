@@ -1,4 +1,4 @@
-﻿package modbus
+package modbus
 
 import "testing"
 
@@ -148,14 +148,14 @@ func TestBuildWriteCommand(t *testing.T) {
 			wantFC:   0x06,
 		},
 		{
-			name:     "G-09 写单个线圈(05)实际输出func=06",
+			name:     "G-09 写单个线圈(05)",
 			devAddr:  0x01,
 			funcCode: 0x05,
 			addr:     0x0000,
 			count:    1,
 			value:    0xFF00,
 			wantLen:  8,
-			wantFC:   0x06, // BuildWriteSingleCommand 硬编码 0x06
+			wantFC:   0x05,
 		},
 		{
 			name:     "G-07 写多个寄存器(10)",

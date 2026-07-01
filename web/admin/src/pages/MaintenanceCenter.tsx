@@ -59,7 +59,7 @@ export default function MaintenanceCenter({ pid, bid, devices }: MaintenanceCent
           ? <RealtimeFaultPanel pid={pid} bid={bid} deviceTypeMap={deviceTypeMap} />
           : subTab === 'history-fault'
           ? <HistoryFaultPanel pid={pid} bid={bid} deviceTypeMap={deviceTypeMap} />
-          : <MaintainRecordPanel pid={pid} bid={bid} deviceTypeMap={deviceTypeMap} devices={devices} />
+          : <MaintainRecordPanel pid={pid} bid={bid} deviceTypeMap={deviceTypeMap} />
         }
       </div>
     </div>
@@ -257,7 +257,7 @@ function HistoryFaultPanel({ pid, bid, deviceTypeMap }: { pid: number; bid: numb
           <div style={{ color: '#8ba0c0', fontSize: 11, marginBottom: 2 }}>时间范围</div>
           <DatePicker.RangePicker
             value={dateRange as any}
-            onChange={(v) => setDateRange(v)}
+            onChange={(v) => setDateRange(v as any)}
             format="YYYY-MM-DD"
             style={{ background: '#0d1f3c', border: '1px solid #1a3455' }}
           />
@@ -325,7 +325,7 @@ function HistoryFaultPanel({ pid, bid, deviceTypeMap }: { pid: number; bid: numb
 }
 
 // ======================== MAINTAIN RECORD PANEL ========================
-function MaintainRecordPanel({ pid, bid, deviceTypeMap, devices }: { pid: number; bid: number; deviceTypeMap: Record<number, string>; devices: any[] }) {
+function MaintainRecordPanel({ pid, bid, deviceTypeMap }: { pid: number; bid: number; deviceTypeMap: Record<number, string>; }) {
   const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeType, setActiveType] = useState('全部设备');
@@ -436,7 +436,7 @@ function MaintainRecordPanel({ pid, bid, deviceTypeMap, devices }: { pid: number
           styles={{
             header: { background: '#0a1628' },
             body: { background: '#0d1f3c' },
-          }}
+          } as any}
           className="maintain-table"
         />
       )}

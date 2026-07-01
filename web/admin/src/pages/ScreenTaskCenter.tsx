@@ -3,7 +3,7 @@ import { Spin, Tag, Table, ConfigProvider, DatePicker, Button } from 'antd';
 import {
   ScheduleOutlined, CheckCircleOutlined, CloseCircleOutlined,
   ClockCircleOutlined, UnorderedListOutlined, SearchOutlined,
-  ReloadOutlined,
+  
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '../api/screenClient';
@@ -13,12 +13,12 @@ const TARGET_TYPES = ['主机', '冷冻泵', '冷却泵', '冷却塔', '阀门',
 
 // ---- dark theme ----
 const darkCard: React.CSSProperties = {
-  background: '#0d1f3c', borderRadius: 6, padding: 16, border: '1px solid #1a3455',
+  background: '#0d2525', borderRadius: 6, padding: 16, border: '1px solid #1a3535',
 };
 
 const darkTableTheme = {
-  token: { colorBgContainer: '#0d1f3c', colorText: '#c0d0e0', colorBorderSecondary: '#1a3455', colorFillAlter: '#0a1628' },
-  components: { Table: { headerBg: '#0a1628', headerColor: '#8ba0c0', rowHoverBg: '#152d50', borderColor: '#1a3455' } },
+  token: { colorBgContainer: '#0d2525', colorText: '#d9e5e4', colorBorderSecondary: '#1a3535', colorFillAlter: '#0a1515' },
+  components: { Table: { headerBg: '#0a1515', headerColor: 'rgba(255,255,255,0.4)', rowHoverBg: '#152d2d', borderColor: '#1a3535' } },
 };
 
 const actionLabel: Record<string, string> = {
@@ -41,11 +41,11 @@ function opLabel(propName: string, ctrlVal: string, remark: string): { type: str
     return { type: ctrlVal, color: ctrlVal === '开机' || ctrlVal === '重启' || ctrlVal === '恢复' ? '#52c41a' : '#ff4d4f' };
   // raw action codes in control_value
   const a = actionLabel[ctrlVal];
-  if (a) return { type: a, color: actionColor[ctrlVal] || '#8ba0c0' };
+  if (a) return { type: a, color: actionColor[ctrlVal] || 'rgba(255,255,255,0.4)' };
   // fallback: use remark or prop_name
   const raw = remark || propName;
   const al = actionLabel[raw];
-  return al ? { type: al, color: actionColor[raw] || '#8ba0c0' } : { type: raw || '控制', color: '#8ba0c0' };
+  return al ? { type: al, color: actionColor[raw] || 'rgba(255,255,255,0.4)' } : { type: raw || '控制', color: 'rgba(255,255,255,0.4)' };
 }
 
 function sourceLabel(username: string): string {
@@ -155,17 +155,17 @@ export default function ScreenTaskCenter({ bid, devices }: ScreenTaskCenterProps
   const recordCols = [
     {
       title: '时间', dataIndex: 'created_at', width: 160,
-      render: (v: string) => <span style={{ color: '#8ba0c0' }}>{v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-'}</span>,
+      render: (v: string) => <span style={{ color: 'rgba(255,255,255,0.4)' }}>{v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-'}</span>,
     },
     {
       title: '设备', dataIndex: 'device_name', width: 120,
-      render: (v: string) => <span style={{ color: '#c0d0e0' }}>{v}</span>,
+      render: (v: string) => <span style={{ color: '#d9e5e4' }}>{v}</span>,
     },
     {
       title: '类型', dataIndex: 'device_id', width: 70,
       render: (id: number) => {
         const t = deviceTypeMap[id];
-        return t ? <Tag style={{ fontSize: 11 }}>{t}</Tag> : <span style={{ color: '#5a7a9a' }}>-</span>;
+        return t ? <Tag style={{ fontSize: 11 }}>{t}</Tag> : <span style={{ color: '#5a7575' }}>-</span>;
       },
     },
     {
@@ -177,28 +177,28 @@ export default function ScreenTaskCenter({ bid, devices }: ScreenTaskCenterProps
     },
     {
       title: '操作值', dataIndex: 'control_value', width: 80,
-      render: (v: string) => <span style={{ color: '#8ba0c0' }}>{v || '-'}</span>,
+      render: (v: string) => <span style={{ color: 'rgba(255,255,255,0.4)' }}>{v || '-'}</span>,
     },
     {
       title: '来源', dataIndex: 'username', width: 90,
-      render: (v: string) => <span style={{ color: '#8ba0c0' }}>{sourceLabel(v)}</span>,
+      render: (v: string) => <span style={{ color: 'rgba(255,255,255,0.4)' }}>{sourceLabel(v)}</span>,
     },
   ];
 
   // ---- task columns ----
   const taskCols = [
-    { title: '名称', dataIndex: 'name', width: 160, render: (v: string) => <span style={{ color: '#c0d0e0' }}>{v}</span> },
-    { title: '设备', dataIndex: 'device_name', width: 120, render: (v: string) => <span style={{ color: '#8ba0c0' }}>{v}</span> },
+    { title: '名称', dataIndex: 'name', width: 160, render: (v: string) => <span style={{ color: '#d9e5e4' }}>{v}</span> },
+    { title: '设备', dataIndex: 'device_name', width: 120, render: (v: string) => <span style={{ color: 'rgba(255,255,255,0.4)' }}>{v}</span> },
     {
       title: '动作', dataIndex: 'action_type', width: 80,
       render: (v: string) => <Tag color={actionColor[v] || 'default'}>{actionLabel[v] || v}</Tag>,
     },
-    { title: '目标值', dataIndex: 'target_value', width: 80, render: (v: any) => <span style={{ color: '#8ba0c0' }}>{v || '-'}</span> },
+    { title: '目标值', dataIndex: 'target_value', width: 80, render: (v: any) => <span style={{ color: 'rgba(255,255,255,0.4)' }}>{v || '-'}</span> },
     {
       title: '周期', dataIndex: 'schedule_type', width: 60,
-      render: (v: string) => <span style={{ color: '#8ba0c0' }}>{scheduleLabel[v] || v}</span>,
+      render: (v: string) => <span style={{ color: 'rgba(255,255,255,0.4)' }}>{scheduleLabel[v] || v}</span>,
     },
-    { title: '执行时间', dataIndex: 'schedule_time', width: 85, render: (v: string) => <span style={{ color: '#c0d0e0' }}>{v}</span> },
+    { title: '执行时间', dataIndex: 'schedule_time', width: 85, render: (v: string) => <span style={{ color: '#d9e5e4' }}>{v}</span> },
     {
       title: '状态', dataIndex: 'enabled', width: 55,
       render: (v: boolean) => v
@@ -211,7 +211,7 @@ export default function ScreenTaskCenter({ bid, devices }: ScreenTaskCenterProps
         ? (v === 'success'
           ? <span style={{ color: '#52c41a' }}><CheckCircleOutlined /> 成功</span>
           : <span style={{ color: '#ff4d4f' }}><CloseCircleOutlined /> 失败</span>)
-        : <span style={{ color: '#5a7a9a' }}>-</span>,
+        : <span style={{ color: '#5a7575' }}>-</span>,
     },
   ];
 
@@ -219,11 +219,7 @@ export default function ScreenTaskCenter({ bid, devices }: ScreenTaskCenterProps
   if (!bid) {
     return (
       <div style={{ padding: 16, height: 'calc(100vh - 112px)', overflowY: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <ScheduleOutlined style={{ color: '#00daf3', fontSize: 18 }} />
-          <span style={{ fontSize: 16, fontWeight: 700, color: '#00daf3' }}>任务中心</span>
-        </div>
-        <div style={{ textAlign: 'center', padding: 80, color: '#5a7a9a' }}>
+        <div style={{ textAlign: 'center', padding: 80, color: '#5a7575' }}>
           <ClockCircleOutlined style={{ fontSize: 48, marginBottom: 12, display: 'block' }} />
           请先选择项目与楼宇
         </div>
@@ -233,19 +229,13 @@ export default function ScreenTaskCenter({ bid, devices }: ScreenTaskCenterProps
 
   return (
     <div style={{ padding: 16, height: 'calc(100vh - 112px)', overflowY: 'auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <ScheduleOutlined style={{ color: '#00daf3', fontSize: 18 }} />
-        <span style={{ fontSize: 16, fontWeight: 700, color: '#00daf3' }}>任务中心</span>
-      </div>
-
       {/* Sub-tabs */}
-      <div style={{ display: 'flex', background: '#0d1f3c', borderRadius: 6, marginBottom: 16, border: '1px solid #1a3455', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', background: '#0d2525', borderRadius: 6, marginBottom: 16, border: '1px solid #1a3535', overflow: 'hidden' }}>
         {SUB_TABS.map(t => (
           <div key={t.key} onClick={() => setSubTab(t.key as any)} style={{
             padding: '8px 20px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-            background: subTab === t.key ? '#152d50' : 'transparent',
-            color: subTab === t.key ? '#00daf3' : '#8ba0c0',
+            background: subTab === t.key ? '#152d2d' : 'transparent',
+            color: subTab === t.key ? '#00daf3' : 'rgba(255,255,255,0.4)',
             borderBottom: subTab === t.key ? '2px solid #00daf3' : '2px solid transparent',
             fontWeight: subTab === t.key ? 700 : 400, fontSize: 13,
           }}>{t.icon} {t.label}</div>
@@ -260,12 +250,12 @@ export default function ScreenTaskCenter({ bid, devices }: ScreenTaskCenterProps
               size="small"
               value={dateRange as any}
               onChange={(v: any) => v && setDateRange(v)}
-              style={{ background: '#0d1f3c', border: '1px solid #1a3455' }}
+              style={{ background: '#0d2525', border: '1px solid #1a3535' }}
               format="YYYY-MM-DD"
             />
             {availableTypes.length > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ color: '#8ba0c0', fontSize: 12 }}>设备类型:</span>
+                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>设备类型:</span>
                 {([''] as string[]).concat(availableTypes).map(t => (
                   <Tag key={t || 'all'} color={typeFilter === t ? '#00daf3' : undefined}
                     style={{ cursor: 'pointer', fontSize: 11 }}
@@ -276,22 +266,22 @@ export default function ScreenTaskCenter({ bid, devices }: ScreenTaskCenterProps
               </div>
             )}
             <Button size="small" icon={<SearchOutlined />} onClick={fetchRecords}
-              style={{ background: '#152d50', border: '1px solid #1a3455', color: '#00daf3' }}>
+              style={{ background: '#152d2d', border: '1px solid #1a3535', color: '#00daf3' }}>
               查询
             </Button>
-            <span style={{ color: '#5a7a9a', fontSize: 12 }}>共{filteredRecords.length}条记录</span>
+            <span style={{ color: '#5a7575', fontSize: 12 }}>共{filteredRecords.length}条记录</span>
           </div>
           <div style={darkCard}>
             {recLoading ? (
               <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
             ) : filteredRecords.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 40, color: '#5a7a9a' }}>
+              <div style={{ textAlign: 'center', padding: 40, color: '#5a7575' }}>
                 暂无控制记录，请选择日期范围后点击查询
               </div>
             ) : (
               <ConfigProvider theme={darkTableTheme}>
                 <Table
-                  rowKey={(r: any, i: number) => `${r.created_at ?? i}-${r.device_name ?? ''}-${i}`}
+                  rowKey={(r: any, i: any) => `${r.created_at ?? i}-${r.device_name ?? ''}-${i}`}
                   columns={recordCols}
                   dataSource={filteredRecords}
                   size="small"
@@ -309,13 +299,13 @@ export default function ScreenTaskCenter({ bid, devices }: ScreenTaskCenterProps
       {subTab === 'scheduled' && (
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-            <span style={{ color: '#5a7a9a', fontSize: 12 }}>共{tasks.length}个任务</span>
+            <span style={{ color: '#5a7575', fontSize: 12 }}>共{tasks.length}个任务</span>
           </div>
           <div style={darkCard}>
             {taskLoading && tasks.length === 0 ? (
               <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
             ) : tasks.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 40, color: '#5a7a9a' }}>
+              <div style={{ textAlign: 'center', padding: 40, color: '#5a7575' }}>
                 <ScheduleOutlined style={{ fontSize: 32, marginBottom: 8, display: 'block' }} />
                 暂无定时任务
               </div>

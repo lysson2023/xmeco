@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider, App as AntdApp } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
+import ErrorBoundary from './components/ErrorBoundary';
 import LoginPage from './pages/Login';
 import MainLayout from './layouts/Main';
 import Projects from './pages/Projects';
@@ -24,6 +25,7 @@ function App() {
   return (
     <ConfigProvider locale={zhCN} theme={{ token: { colorPrimary: '#006875' } }}>
       <AntdApp>
+        <ErrorBoundary>
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
@@ -48,6 +50,7 @@ function App() {
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </BrowserRouter>
+        </ErrorBoundary>
       </AntdApp>
     </ConfigProvider>
   );

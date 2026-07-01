@@ -160,7 +160,7 @@ export default function Properties() {
     }},
     { title: '关键属性', dataIndex: 'is_key', width: 80, render: (v: boolean) => v ? '是' : '否' },
     { title: '简称', dataIndex: 'prop_short', width: 70, render: (v: string) => v || '-' },
-    { title: '电能方向', width: 90, hidden: selectedDeviceInfo?.device_type !== '电表', render: (_: any, r: any) => (
+    { title: '电能方向', width: 90, hidden: selectedDeviceInfo?.device_type !== '电表', render: (_: any, _r: any) => (
       <Select
         size="small"
         style={{ width: 70 }}

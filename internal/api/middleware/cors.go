@@ -6,6 +6,23 @@ import (
 	"strings"
 )
 
+// securityHeaders adds common security-related response headers.
+// Must be called before any w.WriteHeader() in the handler chain.
+func securityHeaders(w http.ResponseWriter) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+}
+
+// originDigest returns a truncated origin suitable for debug logging (avoids
+// logging attacker-controlled long URLs into production log systems).
+func originDigest(origin string) string {
+	if len(origin) > 80 {
+		return origin[:80] + "..."
+	}
+	return origin
+}
+
 // CORS adds CORS headers. Pass allowed origins as a comma-separated list or "*" for development.
 // In production, restrict origin to the actual frontend domain.
 func CORS(allowedOrigins string, next http.Handler) http.Handler {
@@ -22,13 +39,14 @@ func CORS(allowedOrigins string, next http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		securityHeaders(w)
 		reqOrigin := r.Header.Get("Origin")
 		if wildcard {
 			// 安全策略：wildcard 模式仅用于开发环境。
 			// 携带 Authorization 头的凭据请求不反射 Origin（防止任意恶意网站跨域窃取数据）。
 			// 开发环境可通过 XMECO_ALLOWED_ORIGINS 设置具体域名白名单来支持凭据请求。
 			if r.Header.Get("Authorization") != "" {
-				slog.Warn("CORS: credentialed request blocked in wildcard mode — set XMECO_ALLOWED_ORIGINS to explicit domains", "origin", reqOrigin)
+				slog.Debug("CORS: credentialed request blocked in wildcard mode — set XMECO_ALLOWED_ORIGINS to explicit domains", "origin", originDigest(reqOrigin))
 				// 不设置 ACAO 头，浏览器将阻止响应（凭据请求不允许 *）
 			} else {
 				w.Header().Set("Access-Control-Allow-Origin", "*")

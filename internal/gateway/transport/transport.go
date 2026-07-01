@@ -1,4 +1,4 @@
-﻿package transport
+package transport
 
 type GatewayType string
 

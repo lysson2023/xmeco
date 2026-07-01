@@ -10,6 +10,7 @@ import (
 	"github.com/pashagolub/pgxmock/v4"
 
 	"xmeco/internal/api/middleware"
+	"xmeco/internal/repository/postgres"
 	"xmeco/internal/service/auth"
 )
 
@@ -73,9 +74,9 @@ func TestAlarmHandler_CreateRule(t *testing.T) {
 				}
 				defer mock.Close()
 				tt.mockSetup(mock)
-				h = NewAlarmHandler(mock)
+				h = NewAlarmHandler(postgres.NewAlarmRuleRepo(mock), postgres.NewAlarmLogRepo(mock))
 			} else {
-				h = NewAlarmHandler(nil)
+				h = NewAlarmHandler(nil, nil)
 			}
 
 			req := httptest.NewRequest("POST", "/api/v1/alarm-rules", strings.NewReader(tt.body))
@@ -155,7 +156,7 @@ func TestAlarmHandler_ListLogs(t *testing.T) {
 			defer mock.Close()
 			tt.mockSetup(mock)
 
-			h := NewAlarmHandler(mock)
+			h := NewAlarmHandler(postgres.NewAlarmRuleRepo(mock), postgres.NewAlarmLogRepo(mock))
 			req := httptest.NewRequest("GET", "/api/v1/alarm-logs"+tt.queryStr, nil)
 			rec := httptest.NewRecorder()
 			h.ListLogs(rec, req)
@@ -211,9 +212,9 @@ func TestAlarmHandler_AckLog(t *testing.T) {
 				}
 				defer mock.Close()
 				tt.mockSetup(mock)
-				h = NewAlarmHandler(mock)
+				h = NewAlarmHandler(postgres.NewAlarmRuleRepo(mock), postgres.NewAlarmLogRepo(mock))
 			} else {
-				h = NewAlarmHandler(nil)
+				h = NewAlarmHandler(nil, nil)
 			}
 
 			req := httptest.NewRequest("POST", "/api/v1/alarm-logs/42/ack", nil)

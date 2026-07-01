@@ -21,16 +21,67 @@ import (
 
 type M map[string]any
 
+// 常用错误响应，避免字符串字面量散落各处
+var (
+	errBadRequest   = M{"error": "请求格式错误"}
+	errUnauthorized = M{"error": "未认证"}
+	errInternal     = M{"error": "内部服务器错误"}
+)
+
 func queryInt(r *http.Request, key string) int {
-	v, _ := strconv.Atoi(r.URL.Query().Get(key))
-	return v
+	v := r.URL.Query().Get(key)
+	if v == "" {
+		return 0
+	}
+	i, err := strconv.Atoi(v)
+	if err != nil {
+		slog.Warn("queryInt: invalid integer", "key", key, "value", v)
+		return 0
+	}
+	if i < 0 {
+		slog.Warn("queryInt: negative value", "key", key, "value", v)
+		return 0
+	}
+	return i
 }
 
 // pathID extracts a numeric path parameter "id" from the request using ServeMux routing.
+// Returns 0 if the parameter is missing, non-numeric, or negative.
 func pathID(r *http.Request) int {
-	id, _ := strconv.Atoi(r.PathValue("id"))
+	v := r.PathValue("id")
+	if v == "" {
+		return 0
+	}
+	id, err := strconv.Atoi(v)
+	if err != nil {
+		slog.Warn("pathID: invalid integer", "value", v)
+		return 0
+	}
+	if id < 0 {
+		slog.Warn("pathID: negative ID", "value", v)
+		return 0
+	}
 	return id
 }
+
+// 日期格式常量，用于 isValidDate 校验。
+const (
+	dateFmt     = "2006-01-02"
+	datetimeFmt = "2006-01-02 15:04:05"
+	isoFmt      = "2006-01-02T15:04:05"
+)
+
+// isValidDate 校验字符串是否为合法的日期或时间格式。
+// 支持 YYYY-MM-DD、YYYY-MM-DD HH:MM:SS、ISO 8601（不含时区）。
+func isValidDate(s string) bool {
+	for _, layout := range []string{dateFmt, datetimeFmt, isoFmt} {
+		if _, err := time.Parse(layout, s); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	// Marshal first so we don't send partial body with a committed status code.
 	body, err := json.Marshal(v)
@@ -38,18 +89,21 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 		slog.Error("writeJSON marshal failed", "err", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":"内部服务器错误"}`))
+		if _, werr := w.Write([]byte(`{"error":"内部服务器错误"}`)); werr != nil {
+			slog.Warn("writeJSON: fallback error response write failed", "err", werr)
+		}
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write(body)
+	if _, err := w.Write(body); err != nil {
+		slog.Warn("writeJSON: response write failed", "err", err)
+	}
 }
 func ok(w http.ResponseWriter, v interface{})     { writeJSON(w, http.StatusOK, v) }
 func created(w http.ResponseWriter, v interface{}) { writeJSON(w, http.StatusCreated, v) }
 func notFound(w http.ResponseWriter, msg string)   { writeJSON(w, http.StatusNotFound, M{"error": msg}) }
-func itos(i int) string    { return strconv.Itoa(i) }
-func ftoa(f float64) string { return fmt.Sprintf("%.2f", f) }
+func itos(i int) string { return strconv.Itoa(i) } // 供测试辅助 URL 构造
 
 func serverErr(w http.ResponseWriter, err error) {
 	slog.Error("internal server error", "err", err)
@@ -74,13 +128,13 @@ func (h *BuildingHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 func (h *BuildingHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var b domain.Building
-	if err := json.NewDecoder(r.Body).Decode(&b); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil { writeJSON(w, http.StatusBadRequest, errBadRequest); return }
 	if err := h.repo.Create(r.Context(), &b); err != nil { serverErr(w, err); return }
 	created(w, b)
 }
 func (h *BuildingHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var b domain.Building
-	if err := json.NewDecoder(r.Body).Decode(&b); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil { writeJSON(w, http.StatusBadRequest, errBadRequest); return }
 	b.ID = pathID(r)
 	if err := h.repo.Update(r.Context(), &b); err != nil { serverErr(w, err); return }
 	ok(w, b)
@@ -91,10 +145,17 @@ func (h *BuildingHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // ===== DEVICE =====
-// GatewayManager abstracts the gateway manager to allow unit-testing dispatchHardware
+// GatewayManager abstracts the gateway manager to allow unit-testing DispatchHardware
 // without a real gateway connection. The concrete *gateway.Manager satisfies this interface.
 type GatewayManager interface {
 	GetGateway(id string) *gateway.Gateway
+}
+
+// HardwareDispatcher dispatches control actions to physical devices via gateways.
+// The concrete *DeviceHandler satisfies this interface, enabling StartupHandler to
+// send real hardware commands without depending on the concrete type.
+type HardwareDispatcher interface {
+	DispatchHardware(ctx context.Context, devID int, action string) dispatchResult
 }
 
 type DeviceHandler struct {
@@ -124,15 +185,20 @@ func (h *DeviceHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 func (h *DeviceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var d domain.Device
-	if err := json.NewDecoder(r.Body).Decode(&d); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
+	if err := json.NewDecoder(r.Body).Decode(&d); err != nil { writeJSON(w, http.StatusBadRequest, errBadRequest); return }
 	if d.DeviceType == "" { writeJSON(w, http.StatusBadRequest, M{"error": "设备类型不能为空"}); return }
 	if err := h.repo.Create(r.Context(), &d); err != nil { serverErr(w, err); return }
 	created(w, d)
 }
 func (h *DeviceHandler) Update(w http.ResponseWriter, r *http.Request) {
+	id := pathID(r)
+	if id <= 0 {
+		writeJSON(w, http.StatusBadRequest, M{"error": "无效的设备 ID"})
+		return
+	}
 	var d domain.Device
-	if err := json.NewDecoder(r.Body).Decode(&d); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
-	d.ID = pathID(r)
+	if err := json.NewDecoder(r.Body).Decode(&d); err != nil { writeJSON(w, http.StatusBadRequest, errBadRequest); return }
+	d.ID = id
 	if err := h.repo.Update(r.Context(), &d); err != nil { serverErr(w, err); return }
 	ok(w, d)
 }
@@ -145,7 +211,7 @@ func (h *DeviceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // GET /api/v1/devices/{id}/sensor-data
 func (h *DeviceHandler) SensorData(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
-	if id == 0 {
+	if id <= 0 {
 		writeJSON(w, http.StatusBadRequest, M{"error": "无效的设备 ID"})
 		return
 	}
@@ -153,6 +219,10 @@ func (h *DeviceHandler) SensorData(w http.ResponseWriter, r *http.Request) {
 	// 获取设备信息（含网关编号）
 	dev, err := h.repo.GetByID(r.Context(), id)
 	if err != nil {
+		serverErr(w, err)
+		return
+	}
+	if dev == nil {
 		notFound(w, "设备不存在")
 		return
 	}
@@ -243,7 +313,7 @@ func (h *DeviceHandler) SensorData(w http.ResponseWriter, r *http.Request) {
 // PUT /api/v1/devices/{id}/sensor-config
 func (h *DeviceHandler) SaveSensorConfig(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
-	if id == 0 {
+	if id <= 0 {
 		writeJSON(w, http.StatusBadRequest, M{"error": "无效的设备 ID"})
 		return
 	}
@@ -257,7 +327,7 @@ func (h *DeviceHandler) SaveSensorConfig(w http.ResponseWriter, r *http.Request)
 		SignalStrength  *float64 `json:"signal_strength"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
+		writeJSON(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
 	if body.IntervalMinutes <= 0 {
@@ -330,11 +400,11 @@ func controlActionCN(action string) (controlVal, deviceStatus string) {
 	}
 }
 
-// dispatchHardware sends the control action to the physical device via the gateway.
+// DispatchHardware sends the control action to the physical device via the gateway.
 // It looks up the register's write_addr/write_code by command_code, builds a Modbus
 // write command, and transmits it through the device's gateway transport.
 // Returns a dispatchResult indicating whether the command reached the hardware.
-func (h *DeviceHandler) dispatchHardware(ctx context.Context, devID int, action string) dispatchResult {
+func (h *DeviceHandler) DispatchHardware(ctx context.Context, devID int, action string) dispatchResult {
 	if h.gwMgr == nil {
 		return dispatchResult{Dispatched: false, Message: "gateway manager not available"}
 	}
@@ -360,11 +430,14 @@ func (h *DeviceHandler) dispatchHardware(ctx context.Context, devID int, action 
 		 WHERE dp.device_id=$1 AND r.write_addr>0 AND r.command_code=$2
 		 ORDER BY r.id LIMIT 1`, devID, action).Scan(&writeAddr, &writeCode)
 	if err != nil {
-		slog.Warn("dispatchHardware: no register config", "dev", devID, "action", action)
+		slog.Warn("DispatchHardware: no register config", "dev", devID, "action", action)
 		return dispatchResult{Dispatched: false, Message: "no register write config for action: " + action}
 	}
 	if deviceNo > 255 {
 		return dispatchResult{Dispatched: false, Message: fmt.Sprintf("deviceNo %d exceeds 255", deviceNo)}
+	}
+	if nodeAddr > 65535 || nodeAddr < 0 {
+		return dispatchResult{Dispatched: false, Message: fmt.Sprintf("nodeAddr %d exceeds uint16 range", nodeAddr)}
 	}
 	dn := deviceNo & 0xFF
 	writeVal := uint16(0xFF00) // ON by default
@@ -387,7 +460,7 @@ func (h *DeviceHandler) dispatchHardware(ctx context.Context, devID int, action 
 
 func (h *DeviceHandler) Control(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
-	if id == 0 {
+	if id <= 0 {
 		writeJSON(w, http.StatusBadRequest, M{"error": "无效的设备 ID"})
 		return
 	}
@@ -424,7 +497,7 @@ func (h *DeviceHandler) Control(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Dispatch to physical device via gateway.
-	dr := h.dispatchHardware(r.Context(), id, body.Action)
+	dr := h.DispatchHardware(r.Context(), id, body.Action)
 
 	if deviceStatus != "" {
 		if _, err := h.pool.Exec(r.Context(), `UPDATE device SET device_status=$1 WHERE id=$2`, deviceStatus, id); err != nil {
@@ -452,13 +525,13 @@ func (h *PropertyHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 func (h *PropertyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var p domain.DeviceProperty
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil { writeJSON(w, http.StatusBadRequest, errBadRequest); return }
 	if err := h.repo.Create(r.Context(), &p); err != nil { serverErr(w, err); return }
 	created(w, p)
 }
 func (h *PropertyHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var p domain.DeviceProperty
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil { writeJSON(w, http.StatusBadRequest, errBadRequest); return }
 	p.ID = pathID(r)
 	if err := h.repo.Update(r.Context(), &p); err != nil { serverErr(w, err); return }
 	ok(w, p)
@@ -486,13 +559,13 @@ func (h *RegisterHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 func (h *RegisterHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var reg domain.Register
-	if err := json.NewDecoder(r.Body).Decode(&reg); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
+	if err := json.NewDecoder(r.Body).Decode(&reg); err != nil { writeJSON(w, http.StatusBadRequest, errBadRequest); return }
 	if err := h.repo.Create(r.Context(), &reg); err != nil { serverErr(w, err); return }
 	created(w, reg)
 }
 func (h *RegisterHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var reg domain.Register
-	if err := json.NewDecoder(r.Body).Decode(&reg); err != nil { writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"}); return }
+	if err := json.NewDecoder(r.Body).Decode(&reg); err != nil { writeJSON(w, http.StatusBadRequest, errBadRequest); return }
 	reg.ID = pathID(r)
 	if err := h.repo.Update(r.Context(), &reg); err != nil { serverErr(w, err); return }
 	ok(w, reg)

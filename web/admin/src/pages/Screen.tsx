@@ -15,6 +15,7 @@ import ScreenDecisionCenter from './ScreenDecisionCenter';
 import ScreenEnergyCenter from './ScreenEnergyCenter';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { TOPO_ORDER, TOPO_COLORS, QUICK_MODES } from '../utils/constants';
+import './Login.css';
 
 // ---- Global keyframes for fault flashing (inject once, guarded by ID) ----
 if (!document.getElementById('screen-fault-pulse-style')) {
@@ -178,21 +179,77 @@ export default function Screen() {
   // ==================== LOGIN SCREEN ====================
   if (!loggedIn) {
     return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #0a1628, #1a2a4a)' }}>
-        <div style={{ width: 380, padding: 40, background: 'rgba(255,255,255,0.05)', borderRadius: 16, border: '1px solid rgba(79,195,247,0.2)', textAlign: 'center', backdropFilter: 'blur(10px)' }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}><ThunderboltOutlined style={{ color: '#4fc3f7' }} /></div>
-          <h1 style={{ fontSize: 22, color: '#4fc3f7', fontWeight: 700, marginBottom: 4 }}>熊猫智控 XMECO</h1>
-          <p style={{ fontSize: 13, color: '#8b949e', marginBottom: 28 }}>智慧能效大屏系统</p>
-          <Input size="large" prefix={<UserOutlined style={{ color: '#8b949e' }} />} placeholder="用户名"
-            value={uname} onChange={e => setUname(e.target.value)} onPressEnter={doLogin}
-            style={{ marginBottom: 14, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(79,195,247,0.2)', color: '#c9d1d9' }} />
-          <Input.Password size="large" prefix={<LockOutlined style={{ color: '#8b949e' }} />} placeholder="密码"
-            value={pwd} onChange={e => setPwd(e.target.value)} onPressEnter={doLogin}
-            style={{ marginBottom: 20, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(79,195,247,0.2)', color: '#c9d1d9' }} />
-          <Button type="primary" size="large" block loading={loginLoading} onClick={doLogin}
-            style={{ height: 44, background: '#4fc3f7', borderColor: '#4fc3f7', fontWeight: 600, fontSize: 15 }}>登 录</Button>
-          <div style={{ marginTop: 20, fontSize: 11, color: '#484f58' }}>© 深圳市高海拔科技有限公司</div>
+      <div className="login-wrapper">
+        <div className="bg-layer">
+          <div className="bg-subgrid" />
+          <div className="bg-grid" />
+          <div className="fiber-line" style={{ top: '15%', animationDelay: '0s' }} />
+          <div className="fiber-line" style={{ top: '45%', animationDelay: '2s', width: '200px', opacity: 0.4 }} />
+          <div className="fiber-line" style={{ top: '75%', animationDelay: '1.5s' }} />
+          <div className="fiber-line" style={{ top: '90%', animationDelay: '3s', width: '300px' }} />
+          <div className="junction" style={{ top: '20%', left: '30%' }} />
+          <div className="junction" style={{ top: '40%', left: '70%', animationDelay: '0.5s' }} />
+          <div className="junction" style={{ top: '60%', left: '20%', animationDelay: '1.2s' }} />
+          <div className="junction" style={{ top: '80%', left: '85%', animationDelay: '0.8s' }} />
+          <div className="junction" style={{ top: '15%', left: '55%', animationDelay: '1.5s' }} />
+          <div className="junction" style={{ top: '75%', left: '45%', animationDelay: '2s' }} />
+          <div className="bg-glow" />
         </div>
+
+        <div className="particles-layer">
+          <div className="particle sm" style={{ top: '90%', left: '10%', '--tx': '100px', '--ty': '-900px' } as React.CSSProperties} />
+          <div className="particle sm" style={{ top: '95%', left: '40%', '--tx': '-50px', '--ty': '-900px', animationDelay: '1s' } as React.CSSProperties} />
+          <div className="particle" style={{ top: '85%', left: '70%', '--tx': '200px', '--ty': '-800px', animationDelay: '2s' } as React.CSSProperties} />
+          <div className="particle md" style={{ top: '50%', left: '50%', '--tx': '300px', '--ty': '-200px', animationDelay: '0.5s' } as React.CSSProperties} />
+          <div className="particle md" style={{ top: '20%', left: '80%', '--tx': '-400px', '--ty': '400px', animationDelay: '3s', opacity: 0.5 } as React.CSSProperties} />
+          <div className="particle md" style={{ top: '60%', left: '20%', '--tx': '500px', '--ty': '100px' } as React.CSSProperties} />
+          <div className="particle lg" style={{ top: '10%', left: '30%', '--tx': '100px', '--ty': '800px' } as React.CSSProperties} />
+          <div className="particle lg" style={{ top: '80%', left: '60%', '--tx': '-200px', '--ty': '-700px', animationDelay: '5s' } as React.CSSProperties} />
+        </div>
+
+        <div className="central-hub">
+          <div className="hub-core" />
+          <div className="hub-ring ring-1" />
+          <div className="hub-ring ring-2" />
+        </div>
+
+        <main className="login-card-wrapper">
+          <div className="login-card">
+            <div className="scan-line" />
+            <div className="brand-area">
+              <h1 className="brand-title">熊猫智控<span className="brand-sub">XMECO</span></h1>
+              <p className="brand-tagline">智慧能效大屏系统</p>
+            </div>
+            <form className="login-form" onSubmit={e => { e.preventDefault(); doLogin(); }}>
+              <div className="input-group">
+                <label className="input-label">用户名</label>
+                <div className="input-wrap">
+                  <input className="login-input" type="text" placeholder="请输入用户名"
+                    value={uname} onChange={e => setUname(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && doLogin()} />
+                  <div className="input-underline" />
+                  <span className="input-icon">👤</span>
+                </div>
+              </div>
+              <div className="input-group">
+                <label className="input-label">密码</label>
+                <div className="input-wrap">
+                  <input className="login-input" type="password" placeholder="••••••••••"
+                    value={pwd} onChange={e => setPwd(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && doLogin()} />
+                  <div className="input-underline" />
+                  <span className="input-icon">🔒</span>
+                </div>
+              </div>
+              <button className="login-btn" type="submit" disabled={loginLoading}>
+                <span className="btn-text">{loginLoading ? '登录中…' : '登录'}</span>
+                <div className="btn-shine" />
+              </button>
+            </form>
+          </div>
+        </main>
+
+        <footer className="login-footer"><div>© 深圳市高海拔科技有限公司</div></footer>
       </div>
     );
   }
@@ -207,7 +264,7 @@ export default function Screen() {
   return (
     <div style={{ minHeight: '100vh', background: '#0a1628', color: '#c0d0e0', fontFamily: 'system-ui' }}>
       {/* Row 1: Header */}
-      <div style={{ display: 'flex', alignItems: 'center', padding: '6px 20px', background: '#0d1f3c', borderBottom: '1px solid #1a3455' }}>
+      <div className="screen-header" style={{ display: 'flex', alignItems: 'center', padding: '6px 20px', background: '#0d1f3c', borderBottom: '1px solid #1a3455' }}>
         <Select style={{ width: 140 }} placeholder="项目" value={pid || undefined}
           onChange={v => { setPid(v); setBid(0); }}
           options={(data.projects || []).map((p: any) => ({ value: p.id, label: p.name }))} />
@@ -224,7 +281,7 @@ export default function Screen() {
       {/* Row 2: Tabs */}
       <div style={{ display: 'flex', background: '#0d1f3c', borderBottom: '1px solid #1a3455' }}>
         {TABS.map(t => (
-          <div key={t.key} onClick={() => setTab(t.key)} style={{
+          <div key={t.key} className="screen-tab" onClick={() => setTab(t.key)} style={{
             padding: '10px 24px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
             background: tab === t.key ? '#152d50' : 'transparent',
             color: tab === t.key ? '#00daf3' : '#8ba0c0',
@@ -512,7 +569,15 @@ function TopoDevice({ d, color, onOpen, size }: { d: any; color: string; onOpen:
       animation: anim,
       transition: 'transform 0.15s',
     }} onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.05)')} onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}>
-      {!isLarge && <div style={{ fontSize: labelFontSize, color: labelColor }}>{label}</div>}
+      {!isLarge && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+            background: isFault ? '#ff4d4f' : isOnline && isOn ? '#7fffd4' : isOnline && !isOn ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.15)',
+            boxShadow: isFault ? '0 0 6px #ff4d4f' : isOnline && isOn ? '0 0 6px rgba(127,255,212,0.6)' : 'none',
+          }} />
+        </div>
+      )}
       <div style={{ lineHeight: 1.2, textAlign: 'center', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: boxW - 8, color: nameColor }}>{d.name.length > nameMax ? d.name.slice(0, nameMax) + '…' : d.name}</div>
       {isLarge && d.key_info && (() => {
         const lines = d.key_info.split(/\s*\|\s*/).filter(Boolean);

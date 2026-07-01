@@ -61,7 +61,10 @@ export default function Devices() {
   useEffect(() => {
     if (selectedBuilding) {
       setLoading(true);
-      api.get('/devices?building_id='+selectedBuilding).then(r => { setData(r.data); setLoading(false); }).catch(() => setLoading(false));
+      api.get('/devices?building_id='+selectedBuilding)
+        .then(r => { setData(r.data); })
+        .catch(() => { message.error('设备列表加载失败'); setData([]); })
+        .finally(() => { setLoading(false); });
     } else {
       setData([]);
     }

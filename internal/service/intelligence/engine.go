@@ -7,6 +7,27 @@ import (
 	"math"
 )
 
+// 冷机-冷却塔联动调优常量
+const (
+	// copGainPerDegreeC — 冷却水温每降低 1°C 预计 COP 提升百分比（行业经验值 2~4%/°C）
+	copGainPerDegreeC = 3.0
+
+	// saveKWPerDegreeC — 典型冷机冷却水温每降低 1°C 的节电功率（中等负荷下约 1.8 kW/°C）
+	saveKWPerDegreeC = 1.8
+
+	// minApproachTemp — 冷却塔最小可达成逼近温度（湿球温度低时）
+	minApproachTemp = 3.5
+
+	// maxApproachTemp — 高温高湿工况下的逼近温度
+	maxApproachTemp = 6.0
+
+	// defaultApproachTemp — 数据库无冷机数据时的缺省逼近温度
+	defaultApproachTemp = 5.0
+
+	// coolWeatherApproachTemp — 湿球温度较低（<20°C）时的推荐逼近温度
+	coolWeatherApproachTemp = 4.0
+)
+
 // ---- Cooperative Control Types ----
 
 // StrategyResult bundles all cooperative control strategy outputs.
@@ -117,18 +138,18 @@ func (s *Service) linkageStrategies(ctx context.Context, outdoorTemp, outdoorHum
 		}
 
 		// Cooling water approach: typically tw + 4~6°C
-		currentApproach := 6.0
+		currentApproach := maxApproachTemp
 		targetApproach := currentApproach
 
 		// Optimal approach depends on wet bulb
 		if wetBulb <= 15 {
-			targetApproach = 3.5 // lower approach when cool
+			targetApproach = minApproachTemp // lower approach when cool
 		} else if wetBulb <= 20 {
-			targetApproach = 4.5
+			targetApproach = minApproachTemp + 1.0
 		} else if wetBulb <= 25 {
-			targetApproach = 5.5
+			targetApproach = minApproachTemp + 2.0
 		} else {
-			targetApproach = 6.0
+			targetApproach = maxApproachTemp
 		}
 
 		currentCoolingTemp := wetBulb + currentApproach
@@ -137,9 +158,8 @@ func (s *Service) linkageStrategies(ctx context.Context, outdoorTemp, outdoorHum
 		diff := currentCoolingTemp - targetCoolingTemp
 		active := diff > 0.5
 
-		// COP improvement: ~3% per °C cooling water temp reduction
-		copImprove := diff * 3.0
-		saveKW := diff * 1.8 // ~1.8 kW per °C for typical chiller
+		copImprove := diff * copGainPerDegreeC
+		saveKW := diff * saveKWPerDegreeC
 
 		var reason string
 		if active {
@@ -169,17 +189,17 @@ func (s *Service) linkageStrategies(ctx context.Context, outdoorTemp, outdoorHum
 }
 
 func defaultLinkages(wetBulb float64) []LinkageStrategy {
-	approach := 5.0
+	approach := defaultApproachTemp
 	if wetBulb < 20 {
-		approach = 4.0
+		approach = coolWeatherApproachTemp
 	}
-	current := wetBulb + 6.0
+	current := wetBulb + maxApproachTemp
 	target := wetBulb + approach
 	diff := current - target
 	return []LinkageStrategy{{
 		DeviceID: 0, DeviceName: "主机(默认)", CurrentCoolingTemp: round2(current),
 		TargetCoolingTemp: round2(target), WetBulbTemp: wetBulb,
-		COPImprovement: round2(diff * 3), SaveKWPerHour: round2(diff * 1.8),
+		COPImprovement: round2(diff * copGainPerDegreeC), SaveKWPerHour: round2(diff * saveKWPerDegreeC),
 		Reason: fmt.Sprintf("湿球温度 %.1f°C，建议降低冷却水温 %.1f°C", wetBulb, diff), Active: diff > 0.5,
 	}}
 }

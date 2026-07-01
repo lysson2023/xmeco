@@ -168,7 +168,7 @@ func TestDispatchHardware_NoGateway(t *testing.T) {
 
 	// gwMgr is nil → returns immediately without DB query
 	h := NewDeviceHandler(nil, mock)
-	dr := h.dispatchHardware(context.Background(), 1, "start")
+	dr := h.DispatchHardware(context.Background(), 1, "start")
 
 	if dr.Dispatched {
 		t.Error("should not dispatch when gwMgr is nil")
@@ -213,7 +213,7 @@ func TestDispatchHardware_NoGatewayConfig(t *testing.T) {
 
 	h := NewDeviceHandler(nil, mock)
 	h.SetGwMgr(&mockGatewayManager{}) // non-nil gwMgr but gwImei is empty
-	dr := h.dispatchHardware(context.Background(), 1, "start")
+	dr := h.DispatchHardware(context.Background(), 1, "start")
 
 	if dr.Dispatched {
 		t.Error("H-65: should not dispatch when gwImei is empty")
@@ -246,7 +246,7 @@ func TestDispatchHardware_GatewayOffline(t *testing.T) {
 	}
 	h := NewDeviceHandler(nil, mock)
 	h.SetGwMgr(&mockGatewayManager{gw: gw})
-	dr := h.dispatchHardware(context.Background(), 1, "start")
+	dr := h.DispatchHardware(context.Background(), 1, "start")
 
 	if dr.Dispatched {
 		t.Error("H-66: should not dispatch when gateway is offline")
@@ -284,7 +284,7 @@ func TestDispatchHardware_DeviceNoExceeds255(t *testing.T) {
 	}
 	h := NewDeviceHandler(nil, mock)
 	h.SetGwMgr(&mockGatewayManager{gw: gw})
-	dr := h.dispatchHardware(context.Background(), 1, "start")
+	dr := h.DispatchHardware(context.Background(), 1, "start")
 
 	if dr.Dispatched {
 		t.Error("H-67: should not dispatch when deviceNo > 255")
@@ -322,7 +322,7 @@ func TestDispatchHardware_Success(t *testing.T) {
 	}
 	h := NewDeviceHandler(nil, mock)
 	h.SetGwMgr(&mockGatewayManager{gw: gw})
-	dr := h.dispatchHardware(context.Background(), 5, "start")
+	dr := h.DispatchHardware(context.Background(), 5, "start")
 
 	if !dr.Dispatched {
 		t.Error("H-68: should dispatch successfully")
@@ -359,7 +359,7 @@ func TestDispatchHardware_NoRegisterConfig(t *testing.T) {
 	}
 	h := NewDeviceHandler(nil, mock)
 	h.SetGwMgr(&mockGatewayManager{gw: gw})
-	dr := h.dispatchHardware(context.Background(), 1, "start")
+	dr := h.DispatchHardware(context.Background(), 1, "start")
 
 	if dr.Dispatched {
 		t.Error("should not dispatch without register config")

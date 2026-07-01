@@ -1,4 +1,4 @@
-﻿package domain
+package domain
 
 import "time"
 
@@ -39,9 +39,10 @@ type AdminUser struct {
 }
 
 type CreateUserReq struct {
-	Username         string `json:"username"`
-	Password         string `json:"password"`
-	RoleID           int    `json:"role_id"`
-	AgentID          *int   `json:"agent_id"`
-	DefaultProjectID *int   `json:"default_project_id"`
+	Username         string  `json:"username"`
+	Password         string  `json:"password"`
+	RoleID           int     `json:"role_id"`
+	AgentID          *int    `json:"agent_id"`
+	DefaultProjectID *int    `json:"default_project_id"`
+	Remark           *string `json:"remark"`
 }

@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { message } from 'antd';
-import api from '../api/client';
+import api, { resetAuthExpiredFlag } from '../api/client';
 import './Login.css';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -21,10 +22,15 @@ export default function LoginPage() {
       const res = await api.post('/auth/login', { username, password });
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('user', JSON.stringify(res.data.user));
+      resetAuthExpiredFlag();
       message.success('登录成功');
-      navigate('/', { replace: true });
-    } catch (err: any) {
-      message.error(err?.response?.data?.error || '登录失败');
+      const redirect = searchParams.get('redirect');
+      // Only allow relative paths to prevent open redirect attacks.
+      const safe = redirect && !/^(?:https?:|\/\/)/i.test(redirect) ? redirect : '/';
+      navigate(safe, { replace: true });
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      message.error(msg || '登录失败');
     } finally {
       setLoading(false);
     }

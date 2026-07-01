@@ -44,9 +44,8 @@ func (s *Service) AnalyzeEfficiency(ctx context.Context) ([]EfficiencyItem, erro
 		return nil, err
 	}
 
-	// No devices in DB → show demo data for interactive exploration.
 	if len(devs) == 0 {
-		return generateDemoEfficiency(), nil
+		return []EfficiencyItem{}, nil
 	}
 
 	// Batch query latest power telemetry for all relevant devices.
@@ -161,13 +160,15 @@ func (s *Service) AnalyzeEfficiency(ctx context.Context) ([]EfficiencyItem, erro
 }
 
 // fetchLatestPowerMap queries device_telemetry for the latest power reading of
-// every device. It prefers metrics whose name contains "功率" (power).
+// every device. Uses explicit metric name matching instead of LIKE to leverage
+// a B-tree index on the metric column.
 func (s *Service) fetchLatestPowerMap(ctx context.Context) map[int]float64 {
 	rows, err := s.pool.Query(ctx,
 		`SELECT DISTINCT ON (device_id) device_id, value
 		 FROM device_telemetry
-		 WHERE metric LIKE $1
-		 ORDER BY device_id, ts DESC`, "%功率%")
+		 WHERE metric = ANY($1)
+		 ORDER BY device_id, ts DESC`,
+		[]string{"有功功率", "active_power", "P", "功率", "总功率", "总功率因数"})
 	if err != nil {
 		slog.Warn("fetchLatestPowerMap query failed", "err", err)
 		return nil
@@ -182,6 +183,9 @@ func (s *Service) fetchLatestPowerMap(ctx context.Context) map[int]float64 {
 			continue
 		}
 		m[id] = v
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("fetchLatestPowerMap rows iteration error", "err", err)
 	}
 	return m
 }
@@ -251,19 +255,6 @@ func estimatePower(deviceType string) float64 {
 		return 200.0
 	default:
 		return 5.0
-	}
-}
-
-func generateDemoEfficiency() []EfficiencyItem {
-	return []EfficiencyItem{
-		{DeviceID: 0, DeviceName: "约克主机1", DeviceType: "主机", PowerKW: 105.3, LoadPct: 78, COP: 4.8, Efficiency: 80, Status: "良"},
-		{DeviceID: 0, DeviceName: "约克主机2", DeviceType: "主机", PowerKW: 98.7, LoadPct: 72, COP: 5.2, Efficiency: 87, Status: "优"},
-		{DeviceID: 0, DeviceName: "冷冻泵1", DeviceType: "冷冻泵", PowerKW: 22.5, LoadPct: 75, COP: 0, Efficiency: 85, Status: "优"},
-		{DeviceID: 0, DeviceName: "冷冻泵2", DeviceType: "冷冻泵", PowerKW: 24.1, LoadPct: 80, COP: 0, Efficiency: 82, Status: "良"},
-		{DeviceID: 0, DeviceName: "冷却泵1", DeviceType: "冷却泵", PowerKW: 18.3, LoadPct: 61, COP: 0, Efficiency: 78, Status: "良"},
-		{DeviceID: 0, DeviceName: "冷却泵2", DeviceType: "冷却泵", PowerKW: 19.6, LoadPct: 65, COP: 0, Efficiency: 76, Status: "良"},
-		{DeviceID: 0, DeviceName: "冷却塔1", DeviceType: "冷却塔", PowerKW: 5.2, LoadPct: 70, COP: 0, Efficiency: 88, Status: "优"},
-		{DeviceID: 0, DeviceName: "冷却塔2", DeviceType: "冷却塔", PowerKW: 5.8, LoadPct: 77, COP: 0, Efficiency: 84, Status: "良"},
 	}
 }
 

@@ -18,12 +18,15 @@ import (
 
 // Custom protocol constants
 const (
+	// Poll loop configuration
+	pollShutdownTimeout = 10 * time.Second
+	pollMaxConcurrency  = 5
+
+	// Wire protocol markers
 	frameStart = 0x68 // Frame start marker
 	frameEnd   = 0x16 // Frame end marker
 	cmdRegHi   = 0xE5 // Registration command byte high (gateway handshake)
 	cmdRegLo   = 0xFF // Registration command byte low (gateway handshake)
-	cmdDataHi  = 0xE4 // Data command byte high (used by transport/custom.go)
-	cmdDataLo  = 0xA1 // Data command byte low (used by transport/custom.go)
 )
 
 type PollerFn func(ctx context.Context, gw *Gateway, dev DeviceRef) error
@@ -227,11 +230,21 @@ func (m *Manager) markOnline(ctx context.Context, devs []DeviceRef) {
 func (m *Manager) pollLoop(ctx context.Context, gw *Gateway) {
 	ticker := time.NewTicker(m.pollInterval)
 	defer ticker.Stop()
+	var wg sync.WaitGroup
 	defer func() {
+		// WithTimeout prevents indefinite hang on wg.Wait() when
+		// poller goroutines are stuck on unresponsive transports.
+		done := make(chan struct{})
+		go func() { wg.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(pollShutdownTimeout):
+			slog.Warn("poll shutdown timed out", "gw", gw.ID)
+		}
 		m.mu.Lock(); delete(m.gateways, gw.ID); m.mu.Unlock()
 		slog.Info("gateway disconnected", "id", gw.ID)
 	}()
-	sem := make(chan struct{}, 5)
+	sem := make(chan struct{}, pollMaxConcurrency)
 	for {
 		select {
 		case <-ctx.Done(): return
@@ -244,9 +257,15 @@ func (m *Manager) pollLoop(ctx context.Context, gw *Gateway) {
 				select {
 				case <-ctx.Done(): return
 				case sem <- struct{}{}:
+					wg.Add(1)
 					go func(d DeviceRef) {
 						defer func() { <-sem }()
-						if err := m.poller(ctx, gw, d); err != nil {
+						defer wg.Done()
+						// Use a short-lived context so stuck polls don't
+						// block wg.Wait() indefinitely.
+						pollCtx, cancel := context.WithTimeout(ctx, pollShutdownTimeout)
+						defer cancel()
+						if err := m.poller(pollCtx, gw, d); err != nil {
 							slog.Debug("poll error", "gw", gw.ID, "dev", d.DeviceID, "err", err)
 						}
 					}(dev)
@@ -259,8 +278,17 @@ func (m *Manager) pollLoop(ctx context.Context, gw *Gateway) {
 func (m *Manager) Shutdown() {
 	if m.customListener != nil { m.customListener.Close() }
 	if m.dtuListener != nil { m.dtuListener.Close() }
-	m.mu.Lock(); defer m.mu.Unlock()
-	for _, gw := range m.gateways { gw.Transport.Close() }
+	// Collect gateways under lock, then close transports outside the lock
+	// to avoid deadlock with pollLoop's deferred cleanup which also needs m.mu.
+	m.mu.Lock()
+	gateways := make([]*Gateway, 0, len(m.gateways))
+	for _, gw := range m.gateways {
+		gateways = append(gateways, gw)
+	}
+	m.mu.Unlock()
+	for _, gw := range gateways {
+		gw.Transport.Close()
+	}
 }
 
 func (m *Manager) GetGateway(id string) *Gateway { m.mu.RLock(); defer m.mu.RUnlock(); return m.gateways[id] }

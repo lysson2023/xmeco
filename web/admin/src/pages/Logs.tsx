@@ -64,11 +64,11 @@ export default function Logs() {
     if(selDevice) params += '&device_id='+selDevice;
     if(interval&&interval!=='raw') params += '&interval='+interval;
     if(activeTab==='telemetry'){
-      api.get('/logs/telemetry'+params).then(r=>{setData(r.data);setLoading(false);}).catch(()=>setLoading(false));
+      api.get('/logs/telemetry'+params).then(r=>{setData(r.data);setLoading(false);}).catch(()=>{setLoading(false); message.error('遥测数据加载失败'); });
     }else if(activeTab==='controls'){
-      api.get('/logs/controls'+params).then(r=>{setData(r.data);setLoading(false);}).catch(()=>setLoading(false));
+      api.get('/logs/controls'+params).then(r=>{setData(r.data);setLoading(false);}).catch(()=>{setLoading(false); message.error('控制日志加载失败'); });
     }else{
-      api.get('/logs/stats'+params).then(r=>{setStats(r.data);setLoading(false);}).catch(()=>setLoading(false));
+      api.get('/logs/stats'+params).then(r=>{setStats(r.data);setLoading(false);}).catch(()=>{setLoading(false); message.error('统计数据加载失败'); });
     }
   };
 
@@ -141,8 +141,8 @@ export default function Logs() {
         {selDevice && <span style={{paddingBottom:2,color:'#006875',fontWeight:500}}>当前: {getProjName()} → {getBldName()} → {getDeviceName()}</span>}
       </div>
       <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
-        { key:'telemetry', label:'设备数据', children:<Table rowKey={(_:any,i:number)=>`${_?.ts??i}-${_?.metric??''}-${_?.value??_?.avg??i}-${i}`} columns={telemetryCols} dataSource={data} loading={loading} scroll={{x:700}} size="small"/> },
-        { key:'controls', label:'操作日志', children:<Table rowKey={(_:any,i:number)=>`${_?.created_at??i}-${_?.device_name??''}-${_?.control_value??''}-${i}`} columns={controlCols} dataSource={data} loading={loading} scroll={{x:1000}} size="small"/> },
+        { key:'telemetry', label:'设备数据', children:<Table rowKey={(_:any,i:any)=>`${_?.ts??i}-${_?.metric??''}-${_?.value??_?.avg??i}-${i}`} columns={telemetryCols} dataSource={data} loading={loading} scroll={{x:700}} size="small"/> },
+        { key:'controls', label:'操作日志', children:<Table rowKey={(_:any,i:any)=>`${_?.created_at??i}-${_?.device_name??''}-${_?.control_value??''}-${i}`} columns={controlCols} dataSource={data} loading={loading} scroll={{x:1000}} size="small"/> },
         { key:'stats', label:'数据统计', children:<Table rowKey="metric" columns={statCols} dataSource={stats} loading={loading} size="small"/> },
       ]}/>
     </div>

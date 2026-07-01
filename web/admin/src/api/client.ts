@@ -6,13 +6,28 @@ const api = axios.create({
   timeout: 30000,
 });
 
+// Prevent duplicate auth-expired events when multiple requests
+// fail concurrently (e.g. token expires mid-session).
+let authExpiredFired = false;
+function fireAuthExpired() {
+  if (authExpiredFired) return;
+  authExpiredFired = true;
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  window.dispatchEvent(new CustomEvent('auth-expired'));
+}
+
+// resetAuthExpiredFlag resets the dedup guard so that after a fresh login,
+// a future token expiry will trigger the auth-expired flow again.
+export function resetAuthExpiredFlag() {
+  authExpiredFired = false;
+}
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
     if (isTokenExpired(token)) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.dispatchEvent(new CustomEvent('auth-expired'));
+      fireAuthExpired();
       return Promise.reject(new Error('Token expired'));
     }
     config.headers.Authorization = `Bearer ${token}`;
@@ -24,9 +39,7 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.dispatchEvent(new CustomEvent('auth-expired'));
+      fireAuthExpired();
     }
     return Promise.reject(err);
   }

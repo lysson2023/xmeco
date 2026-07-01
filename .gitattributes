@@ -1,5 +1,5 @@
 * text=auto
-*.go text eol=lf
+*.go text eol=lf working-tree-encoding=UTF-8
 *.ts text eol=lf
 *.tsx text eol=lf
 *.vue text eol=lf

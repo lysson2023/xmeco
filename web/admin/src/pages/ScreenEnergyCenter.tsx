@@ -11,15 +11,14 @@ import { api } from '../api/screenClient';
 // ---- dark theme chart colors ----
 const CYAN = '#00daf3';
 const ORANGE = '#fa8c16';
-const GREEN = '#52c41a';
-const AXIS_COLOR = '#5a7a9a';
-const GRID_COLOR = '#1a3455';
+const AXIS_COLOR = '#5a7575';
+const GRID_COLOR = '#1a3535';
 const METER_LINE_COLORS = ['#00daf3', '#fa8c16', '#52c41a', '#ff4d4f', '#722ed1', '#13c2c2', '#eb2f96', '#faad14', '#2f54eb', '#a0d911', '#f759ab', '#597ef7'];
 
 const POWER_KEYWORDS = ['power', 'energy', 'kwh', '功率', '电量', '电度', '有功', '电能'];
 
 const darkCard: React.CSSProperties = {
-  background: '#0d1f3c', borderRadius: 6, padding: 16, border: '1px solid #1a3455',
+  background: '#0d2525', borderRadius: 6, padding: 16, border: '1px solid #1a3535',
 };
 
 const sectionTitle: React.CSSProperties = {
@@ -28,7 +27,7 @@ const sectionTitle: React.CSSProperties = {
 };
 
 const statBox: React.CSSProperties = {
-  background: '#0a1628', borderRadius: 4, padding: '10px 14px', border: '1px solid #1a3455',
+  background: '#0a1515', borderRadius: 4, padding: '10px 14px', border: '1px solid #1a3535',
   textAlign: 'center', minWidth: 110,
 };
 
@@ -136,7 +135,6 @@ export default function ScreenEnergyCenter({ bid, devices, meterPower }: ScreenE
     const thisMonday = now.startOf('week').add(1, 'day');
     // last month
     const lastMonth1st = now.subtract(1, 'month').startOf('month');
-    const lastMonthLast = now.subtract(1, 'month').endOf('month');
     // this month
     const thisMonth1st = now.startOf('month');
     // last year same month
@@ -380,17 +378,13 @@ export default function ScreenEnergyCenter({ bid, devices, meterPower }: ScreenE
   const chartGrid = { stroke: GRID_COLOR, strokeDasharray: '3 3' };
   const xAxisProps = { tick: { fill: AXIS_COLOR, fontSize: 11 }, axisLine: { stroke: GRID_COLOR }, tickLine: false };
   const yAxisProps = { tick: { fill: AXIS_COLOR, fontSize: 11 }, axisLine: { stroke: GRID_COLOR }, tickLine: false };
-  const tooltipStyle = { contentStyle: { background: '#0d1f3c', border: '1px solid #1a3455', borderRadius: 4, color: '#c0d0e0' } };
+  const tooltipStyle = { contentStyle: { background: '#0d2525', border: '1px solid #1a3535', borderRadius: 4, color: '#d9e5e4' } };
 
   // ==================== Empty state ====================
   if (!bid) {
     return (
       <div style={{ padding: 16, height: 'calc(100vh - 112px)', overflowY: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <ThunderboltOutlined style={{ color: '#00daf3', fontSize: 18 }} />
-          <span style={{ fontSize: 16, fontWeight: 700, color: '#00daf3' }}>能耗中心</span>
-        </div>
-        <div style={{ textAlign: 'center', padding: 80, color: '#5a7a9a' }}>
+        <div style={{ textAlign: 'center', padding: 80, color: '#5a7575' }}>
           <ThunderboltOutlined style={{ fontSize: 48, marginBottom: 12, display: 'block' }} />
           请先选择项目与楼宇
         </div>
@@ -401,16 +395,10 @@ export default function ScreenEnergyCenter({ bid, devices, meterPower }: ScreenE
   // ==================== Main render ====================
   return (
     <div style={{ padding: 16, height: 'calc(100vh - 112px)', overflowY: 'auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-        <ThunderboltOutlined style={{ color: '#00daf3', fontSize: 18 }} />
-        <span style={{ fontSize: 16, fontWeight: 700, color: '#00daf3' }}>能耗中心</span>
-      </div>
-
       {/* Metric selector */}
       {powerMetrics.length > 0 && (
         <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ color: '#8ba0c0', fontSize: 12 }}>电量指标:</span>
+          <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>电量指标:</span>
           {powerMetrics.map(m => (
             <Tag key={m} color={selectedMetric === m ? 'cyan' : undefined}
               style={{ cursor: 'pointer', fontSize: 11 }}
@@ -421,7 +409,7 @@ export default function ScreenEnergyCenter({ bid, devices, meterPower }: ScreenE
         </div>
       )}
       {powerMetrics.length === 0 && !statsLoading && (
-        <div style={{ marginBottom: 12, color: '#5a7a9a', fontSize: 12 }}>
+        <div style={{ marginBottom: 12, color: '#5a7575', fontSize: 12 }}>
           未检测到电量指标，请确认设备已配置电量相关属性
         </div>
       )}
@@ -436,57 +424,57 @@ export default function ScreenEnergyCenter({ bid, devices, meterPower }: ScreenE
             {/* Row 1 */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
               <div style={statBox}>
-                <div style={{ fontSize: 11, color: '#8ba0c0' }}>电表总数</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>电表总数</div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: CYAN }}>{meterCount}</div>
-                <div style={{ fontSize: 10, color: '#5a7a9a' }}>台</div>
+                <div style={{ fontSize: 10, color: '#5a7575' }}>台</div>
               </div>
               <div style={statBox}>
-                <div style={{ fontSize: 11, color: '#8ba0c0' }}>用电总数</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>用电总数</div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: CYAN }}>{fmtNum(meterPower)}</div>
-                <div style={{ fontSize: 10, color: '#5a7a9a' }}>当前 kW</div>
+                <div style={{ fontSize: 10, color: '#5a7575' }}>当前 kW</div>
               </div>
               <div style={statBox}>
-                <div style={{ fontSize: 11, color: '#8ba0c0' }}>昨天</div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: '#c0d0e0' }}>{fmtNum(stats.yesterday || 0)}</div>
-                <div style={{ fontSize: 10, color: '#5a7a9a' }}>kWh</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>昨天</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: '#d9e5e4' }}>{fmtNum(stats.yesterday || 0)}</div>
+                <div style={{ fontSize: 10, color: '#5a7575' }}>kWh</div>
               </div>
               <div style={statBox}>
-                <div style={{ fontSize: 11, color: '#8ba0c0' }}>前天</div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: '#c0d0e0' }}>{fmtNum(stats.dayBefore || 0)}</div>
-                <div style={{ fontSize: 10, color: '#5a7a9a' }}>kWh</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>前天</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: '#d9e5e4' }}>{fmtNum(stats.dayBefore || 0)}</div>
+                <div style={{ fontSize: 10, color: '#5a7575' }}>kWh</div>
               </div>
               <div style={statBox}>
-                <div style={{ fontSize: 11, color: '#8ba0c0' }}>上星期</div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: '#c0d0e0' }}>{fmtNum(stats.lastWeek || 0)}</div>
-                <div style={{ fontSize: 10, color: '#5a7a9a' }}>kWh</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>上星期</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: '#d9e5e4' }}>{fmtNum(stats.lastWeek || 0)}</div>
+                <div style={{ fontSize: 10, color: '#5a7575' }}>kWh</div>
               </div>
               <div style={statBox}>
-                <div style={{ fontSize: 11, color: '#8ba0c0' }}>本星期</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>本星期</div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: ORANGE }}>{fmtNum(stats.thisWeek || 0)}</div>
-                <div style={{ fontSize: 10, color: '#5a7a9a' }}>截止上一小时 kWh</div>
+                <div style={{ fontSize: 10, color: '#5a7575' }}>截止上一小时 kWh</div>
               </div>
             </div>
             {/* Row 2 */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <div style={statBox}>
-                <div style={{ fontSize: 11, color: '#8ba0c0' }}>上月</div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: '#c0d0e0' }}>{fmtNum(stats.lastMonth || 0)}</div>
-                <div style={{ fontSize: 10, color: '#5a7a9a' }}>kWh</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>上月</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: '#d9e5e4' }}>{fmtNum(stats.lastMonth || 0)}</div>
+                <div style={{ fontSize: 10, color: '#5a7575' }}>kWh</div>
               </div>
               <div style={statBox}>
-                <div style={{ fontSize: 11, color: '#8ba0c0' }}>本月</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>本月</div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: ORANGE }}>{fmtNum(stats.thisMonth || 0)}</div>
-                <div style={{ fontSize: 10, color: '#5a7a9a' }}>截止上一小时 kWh</div>
+                <div style={{ fontSize: 10, color: '#5a7575' }}>截止上一小时 kWh</div>
               </div>
               <div style={statBox}>
-                <div style={{ fontSize: 11, color: '#8ba0c0' }}>去年</div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: '#c0d0e0' }}>{fmtNum(stats.lastYear || 0)}</div>
-                <div style={{ fontSize: 10, color: '#5a7a9a' }}>kWh</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>去年</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: '#d9e5e4' }}>{fmtNum(stats.lastYear || 0)}</div>
+                <div style={{ fontSize: 10, color: '#5a7575' }}>kWh</div>
               </div>
               <div style={statBox}>
-                <div style={{ fontSize: 11, color: '#8ba0c0' }}>今年</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>今年</div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: ORANGE }}>{fmtNum(stats.thisYear || 0)}</div>
-                <div style={{ fontSize: 10, color: '#5a7a9a' }}>截止上一小时 kWh</div>
+                <div style={{ fontSize: 10, color: '#5a7575' }}>截止上一小时 kWh</div>
               </div>
             </div>
           </>
@@ -499,7 +487,7 @@ export default function ScreenEnergyCenter({ bid, devices, meterPower }: ScreenE
         {hourlyLoading ? (
           <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
         ) : hourlyData.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 40, color: '#5a7a9a' }}>暂无数据</div>
+          <div style={{ textAlign: 'center', padding: 40, color: '#5a7575' }}>暂无数据</div>
         ) : (
           <ResponsiveContainer width="100%" height={320}>
             <LineChart data={hourlyData}>
@@ -507,7 +495,7 @@ export default function ScreenEnergyCenter({ bid, devices, meterPower }: ScreenE
               <XAxis dataKey="hour" {...xAxisProps} />
               <YAxis {...yAxisProps} label={{ value: '用电量(kWh)', angle: -90, position: 'insideLeft', fill: AXIS_COLOR, fontSize: 11, dx: -10 }} />
               <Tooltip {...tooltipStyle} />
-              <Legend wrapperStyle={{ color: '#8ba0c0', fontSize: 11 }} />
+              <Legend wrapperStyle={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }} />
               {/* Total line - thick & prominent */}
               <Line type="monotone" dataKey="总计" stroke={CYAN} strokeWidth={2.5} dot={false} name="总计" />
               {/* Per-meter lines */}
@@ -530,7 +518,7 @@ export default function ScreenEnergyCenter({ bid, devices, meterPower }: ScreenE
           {weeklyLoading ? (
             <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
           ) : weeklyData.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: 40, color: '#5a7a9a' }}>暂无数据</div>
+            <div style={{ textAlign: 'center', padding: 40, color: '#5a7575' }}>暂无数据</div>
           ) : (
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={weeklyData}>
@@ -547,13 +535,13 @@ export default function ScreenEnergyCenter({ bid, devices, meterPower }: ScreenE
         {/* ---- Yearly Comparison Chart ---- */}
         <div style={{ ...darkCard, flex: 1, minWidth: 0 }}>
           <div style={sectionTitle}><ThunderboltOutlined /> 年度12月份用能趋势</div>
-          <div style={{ fontSize: 11, color: '#5a7a9a', marginBottom: 8, marginTop: -8 }}>
+          <div style={{ fontSize: 11, color: '#5a7575', marginBottom: 8, marginTop: -8 }}>
             {dayjs().format('YYYY年')} vs {dayjs().subtract(1, 'year').format('YYYY年')} 每月对比
           </div>
           {yearlyCompLoading ? (
             <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
           ) : yearlyCompData.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: 40, color: '#5a7a9a' }}>暂无数据</div>
+            <div style={{ textAlign: 'center', padding: 40, color: '#5a7575' }}>暂无数据</div>
           ) : (
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={yearlyCompData}>
@@ -561,7 +549,7 @@ export default function ScreenEnergyCenter({ bid, devices, meterPower }: ScreenE
                 <XAxis dataKey="month" {...xAxisProps} />
                 <YAxis {...yAxisProps} />
                 <Tooltip {...tooltipStyle} />
-                <Legend wrapperStyle={{ color: '#8ba0c0', fontSize: 11 }} />
+                <Legend wrapperStyle={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }} />
                 <Bar dataKey="今年" fill={CYAN} radius={[3, 3, 0, 0]} name="今年" />
                 <Bar dataKey="去年" fill={ORANGE} radius={[3, 3, 0, 0]} name="去年" />
               </BarChart>
@@ -573,13 +561,13 @@ export default function ScreenEnergyCenter({ bid, devices, meterPower }: ScreenE
       {/* ==================== Monthly Comparison Chart ==================== */}
       <div style={{ ...darkCard, marginTop: 14 }}>
         <div style={sectionTitle}><ThunderboltOutlined /> 月能耗用能趋势</div>
-        <div style={{ fontSize: 11, color: '#5a7a9a', marginBottom: 8, marginTop: -8 }}>
+        <div style={{ fontSize: 11, color: '#5a7575', marginBottom: 8, marginTop: -8 }}>
           {dayjs().format('YYYY年M月')} vs {dayjs().subtract(1, 'year').format('YYYY年M月')} 每日对比
         </div>
         {monthlyCompLoading ? (
           <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
         ) : monthlyCompData.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 40, color: '#5a7a9a' }}>暂无数据</div>
+          <div style={{ textAlign: 'center', padding: 40, color: '#5a7575' }}>暂无数据</div>
         ) : (
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={monthlyCompData}>
@@ -587,7 +575,7 @@ export default function ScreenEnergyCenter({ bid, devices, meterPower }: ScreenE
               <XAxis dataKey="day" {...xAxisProps} interval={Math.max(0, Math.floor(monthlyCompData.length / 15) - 1)} />
               <YAxis {...yAxisProps} label={{ value: '用电量(kWh)', angle: -90, position: 'insideLeft', fill: AXIS_COLOR, fontSize: 11, dx: -10 }} />
               <Tooltip {...tooltipStyle} />
-              <Legend wrapperStyle={{ color: '#8ba0c0', fontSize: 11 }} />
+              <Legend wrapperStyle={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }} />
               <Bar dataKey="本月" fill={CYAN} radius={[3, 3, 0, 0]} name="本月" />
               <Bar dataKey="去年同月" fill={ORANGE} radius={[3, 3, 0, 0]} name="去年同月" />
             </BarChart>

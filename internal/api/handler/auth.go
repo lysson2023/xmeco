@@ -1,4 +1,4 @@
-﻿package handler
+package handler
 
 import (
 	"encoding/json"
@@ -26,7 +26,7 @@ type loginReq struct {
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
+		writeJSON(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
 	token, user, err := h.svc.Login(r.Context(), req.Username, req.Password)

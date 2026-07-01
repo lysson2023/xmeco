@@ -1,8 +1,9 @@
-﻿package handler
+package handler
 
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"xmeco/internal/domain"
 	"xmeco/internal/repository/postgres"
@@ -31,11 +32,15 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var p domain.Project
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
+		writeJSON(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
 	if err := h.repo.Create(r.Context(), &p); err != nil {
-		writeJSON(w, http.StatusConflict, M{"error": "项目创建失败"})
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
+			writeJSON(w, http.StatusConflict, M{"error": "项目名称已存在"})
+			return
+		}
+		serverErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
@@ -57,7 +62,7 @@ func (h *ProjectHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var p domain.Project
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
+		writeJSON(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
 	p.ID = pathID(r)
@@ -92,7 +97,7 @@ func (h *ProjectHandler) SetProjectUsers(w http.ResponseWriter, r *http.Request)
 		UserIDs []int `json:"user_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
+		writeJSON(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
 	if body.UserIDs == nil { body.UserIDs = []int{} }

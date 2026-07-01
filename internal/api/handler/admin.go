@@ -46,7 +46,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req domain.CreateUserReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
+		writeJSON(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
 	if req.Username == "" || req.Password == "" || req.RoleID == 0 {
@@ -73,17 +73,18 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		RoleID   int    `json:"role_id"`
-		AgentID  *int   `json:"agent_id"`
-		IsActive *bool  `json:"is_active"`
-		Remark   *string `json:"remark"`
+		RoleID           int     `json:"role_id"`
+		AgentID          *int    `json:"agent_id"`
+		IsActive         *bool   `json:"is_active"`
+		Remark           *string `json:"remark"`
+		DefaultProjectID *int    `json:"default_project_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
+		writeJSON(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
 	id := pathID(r)
-	if id == 0 {
+	if id <= 0 {
 		writeJSON(w, http.StatusBadRequest, M{"error": "无效的用户 ID"})
 		return
 	}
@@ -98,21 +99,28 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isActive := true
-	if body.IsActive != nil {
-		isActive = *body.IsActive
+	// Validate default_project_id
+	if body.DefaultProjectID != nil && *body.DefaultProjectID < 0 {
+		writeJSON(w, http.StatusBadRequest, M{"error": "无效的项目 ID"})
+		return
 	}
-	// If isActive is not provided (nil), preserve existing value by passing 0
-	// for roleID to skip the update (SQL uses CASE WHEN $1=0 THEN role_id ELSE $1 END).
+	// roleID=0 skips the update (SQL uses CASE WHEN $1=0 THEN role_id ELSE $1 END).
 	roleID := body.RoleID
-	if body.IsActive == nil && body.RoleID == 0 && body.AgentID == nil && body.Remark == nil {
+	if body.IsActive == nil && body.RoleID == 0 && body.AgentID == nil && body.Remark == nil && body.DefaultProjectID == nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "至少需要提供一个要更新的字段"})
 		return
 	}
-	if err := h.repo.UpdateUser(r.Context(), id, roleID, body.AgentID, isActive, body.Remark); err != nil {
+	if err := h.repo.UpdateUser(r.Context(), id, roleID, body.AgentID, body.IsActive, body.Remark, body.DefaultProjectID); err != nil {
 		slog.Warn("UpdateUser failed", "id", id, "err", err)
 		writeJSON(w, http.StatusInternalServerError, M{"error": "更新失败"})
 		return
+	}
+	// 禁用用户时递增 token_version，使已签发的 token 立即失效
+	if body.IsActive != nil && !*body.IsActive {
+		if err := h.repo.IncrementTokenVersion(r.Context(), id); err != nil {
+			slog.Warn("increment token_version on disable failed", "user", id, "err", err)
+		}
+		h.authSvc.InvalidateTokenVersion(id)
 	}
 	ok(w, M{"status": "updated"})
 }
@@ -175,6 +183,11 @@ func (h *AdminHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, M{"error": "用户不存在"})
 		return
 	}
+	// Invalidate all existing tokens for this user by incrementing token_version
+	if err := h.repo.IncrementTokenVersion(r.Context(), targetID); err != nil {
+		slog.Warn("increment token_version failed", "user", targetID, "err", err)
+	}
+	h.authSvc.InvalidateTokenVersion(targetID)
 	ok(w, M{"status": "password_reset"})
 }
 
@@ -194,6 +207,11 @@ func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		serverErr(w, err)
 		return
 	}
+	// Invalidate all existing tokens for the deleted user
+	if err := h.repo.IncrementTokenVersion(r.Context(), id); err != nil {
+		slog.Warn("increment token_version on delete failed", "user", id, "err", err)
+	}
+	h.authSvc.InvalidateTokenVersion(id)
 	ok(w, M{"status": "deleted"})
 }
 
@@ -333,7 +351,7 @@ func (h *AdminHandler) SetRolePermissions(w http.ResponseWriter, r *http.Request
 		PermIDs []int `json:"perm_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
+		writeJSON(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
 	roleID := pathID(r)

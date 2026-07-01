@@ -125,9 +125,9 @@ export default function Registers() {
     { title: '操作', width: 75, render: (_:any, r:any) => (
       <Space size="small">
         <a onClick={() => { setEditing(r); form.setFieldsValue(r);
-          setCustomReadCode(!READ_CODES.includes(r.read_code));
-          setCustomWriteCode(!WRITE_CODES.includes(r.write_code));
-          setCustomMag(!MAGNIFICATIONS.includes(Number(r.magnification)));
+          setCustomReadCode(!(READ_CODES as readonly string[]).includes(r.read_code));
+          setCustomWriteCode(!(WRITE_CODES as readonly string[]).includes(r.write_code));
+          setCustomMag(!(MAGNIFICATIONS as readonly number[]).includes(Number(r.magnification)));
           setModalOpen(true); }}>编辑</a>
         <Popconfirm title="确定?" onConfirm={()=>del(r.id)}><a style={{color:'red'}}>删除</a></Popconfirm>
       </Space>

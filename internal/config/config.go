@@ -11,18 +11,21 @@ import (
 )
 
 type Config struct {
-	DBHost          string
-	DBPort          string
-	DBUser          string
-	DBPassword      string
-	DBName          string
-	DBSSLMode       string
-	ServerPort      string
-	JWTSecret       string
-	AllowedOrigins  string // CORS 允许的来源，逗号分隔；生产环境必须明确设置
-	TrustedProxy    string // 受信反向代理 CIDR，逗号分隔；为空则仅信任 RemoteAddr
-	RetentionDays   int    // 数据保留天数，0=不清理
-	PollIntervalSec int    // 轮询间隔秒数，0=默认3秒
+	DBHost                  string
+	DBPort                  string
+	DBUser                  string
+	DBPassword              string
+	DBName                  string
+	DBSSLMode               string
+	ServerPort              string
+	JWTSecret               string
+	AllowedOrigins          string // CORS 允许的来源，逗号分隔；生产环境必须明确设置
+	TrustedProxy            string // 受信反向代理 CIDR，逗号分隔；为空则仅信任 RemoteAddr
+	RetentionDays           int    // 数据保留天数，0=不清理
+	PollIntervalSec         int    // 轮询间隔秒数，0=默认3秒
+	OfflineThresholdMinutes int    // 离线检测阈值（分钟），默认10，最小1
+	RetentionBatchSize      int    // 数据清理每批次最大行数，默认10000
+	LoginRateLimit          int    // 每分钟每IP最大登录尝试次数，默认10
 }
 
 // ErrNoSecret is returned when the JWT secret is the default and DEV_MODE is not enabled.
@@ -46,19 +49,27 @@ func Load() (*Config, error) {
 	}
 	allowedOrigins := getEnv("XMECO_ALLOWED_ORIGINS", "*")
 	trustedProxy := getEnv("XMECO_TRUSTED_PROXY", "")
+	offlineThreshold := getEnvInt("XMECO_OFFLINE_THRESHOLD_MINUTES", 10)
+	if offlineThreshold < 1 {
+		slog.Warn("OfflineThresholdMinutes must be >= 1, using default 10", "value", offlineThreshold)
+		offlineThreshold = 10
+	}
 	return &Config{
-		DBHost:          getEnv("XMECO_DB_HOST", "localhost"),
-		DBPort:          getEnv("XMECO_DB_PORT", "5432"),
-		DBUser:          getEnv("XMECO_DB_USER", "postgres"),
-		DBPassword:      dbPassword,
-		DBName:          getEnv("XMECO_DB_NAME", "xmeco"),
-		DBSSLMode:       getEnv("XMECO_DB_SSLMODE", "disable"),
-		ServerPort:      getEnv("XMECO_SERVER_PORT", "9090"),
-		JWTSecret:       jwtSecret,
-		AllowedOrigins:  allowedOrigins,
-		TrustedProxy:    trustedProxy,
-		RetentionDays:   getEnvInt("XMECO_RETENTION_DAYS", 730),
-		PollIntervalSec: getEnvInt("XMECO_POLL_INTERVAL_SEC", 3),
+		DBHost:                  getEnv("XMECO_DB_HOST", "localhost"),
+		DBPort:                  getEnv("XMECO_DB_PORT", "5432"),
+		DBUser:                  getEnv("XMECO_DB_USER", "postgres"),
+		DBPassword:              dbPassword,
+		DBName:                  getEnv("XMECO_DB_NAME", "xmeco"),
+		DBSSLMode:               getEnv("XMECO_DB_SSLMODE", "disable"),
+		ServerPort:              getEnv("XMECO_SERVER_PORT", "9090"),
+		JWTSecret:               jwtSecret,
+		AllowedOrigins:          allowedOrigins,
+		TrustedProxy:            trustedProxy,
+		RetentionDays:           getEnvInt("XMECO_RETENTION_DAYS", 730),
+		PollIntervalSec:         getEnvInt("XMECO_POLL_INTERVAL_SEC", 3),
+		OfflineThresholdMinutes: offlineThreshold,
+		RetentionBatchSize:      getEnvInt("XMECO_RETENTION_BATCH_SIZE", 10000),
+		LoginRateLimit:          getEnvInt("XMECO_LOGIN_RATE_LIMIT", 10),
 	}, nil
 }
 

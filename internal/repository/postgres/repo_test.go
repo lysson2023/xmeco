@@ -568,7 +568,7 @@ func TestAdminRepoCreateUser(t *testing.T) {
 	cols := []string{"id", "created_at"}
 	req := domain.CreateUserReq{Username: "newuser", RoleID: 2}
 	mock.ExpectQuery("INSERT INTO users").
-		WithArgs("newuser", "hashed", 2, pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs("newuser", "hashed", 2, pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows(cols).AddRow(5, now))
 
 	u, err := repo.CreateUser(context.TODO(), req, "hashed")
@@ -587,11 +587,12 @@ func TestAdminRepoUpdateUser(t *testing.T) {
 
 	agentID := 2
 	remark := "备注"
+	isActive := true
 	mock.ExpectExec("UPDATE users SET").
-		WithArgs(3, &agentID, true, &remark, 1).
+		WithArgs(3, &agentID, &isActive, &remark, 1, (*int)(nil)).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
-	if err := repo.UpdateUser(context.TODO(), 1, 3, &agentID, true, &remark); err != nil {
+	if err := repo.UpdateUser(context.TODO(), 1, 3, &agentID, &isActive, &remark, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -603,10 +604,10 @@ func TestAdminRepoUpdateUserMinimal(t *testing.T) {
 
 	// roleID=0 means "keep current" (CASE WHEN $1=0)
 	mock.ExpectExec("UPDATE users SET").
-		WithArgs(0, pgxmock.AnyArg(), true, pgxmock.AnyArg(), 1).
+		WithArgs(0, pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), 1, pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
-	if err := repo.UpdateUser(context.TODO(), 1, 0, nil, true, nil); err != nil {
+	if err := repo.UpdateUser(context.TODO(), 1, 0, nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 }

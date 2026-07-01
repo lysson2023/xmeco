@@ -1,4 +1,4 @@
-﻿package alarm
+package alarm
 
 import (
 	"context"
@@ -18,8 +18,10 @@ func (e *Engine) Evaluate(ctx context.Context, deviceID int, deviceName, deviceT
 		`SELECT id, condition, COALESCE(threshold,0), level,
 		        COALESCE(min_value,''), COALESCE(max_value,'')
 		 FROM alarm_rule
-		 WHERE enabled=true AND metric=$1 AND (device_type=$2 OR device_type IS NULL OR device_type='')`,
-		metric, deviceType)
+		 WHERE enabled=true AND metric=$1
+		   AND (device_type=$2 OR device_type IS NULL OR device_type='')
+		   AND (device_id=$3 OR device_id IS NULL)`,
+		metric, deviceType, deviceID)
 	if err != nil { return err }
 	defer rows.Close()
 
@@ -44,12 +46,14 @@ func (e *Engine) Evaluate(ctx context.Context, deviceID int, deviceName, deviceT
 		tag, err := e.pool.Exec(ctx,
 			`INSERT INTO alarm_log (device_id,device_name,alarm_type,level,message,value,threshold,created_at)
 			 VALUES($1,$2,$3,$4,$5,$6,$7,NOW())
-			 ON CONFLICT (device_id, alarm_type) WHERE ack_at IS NULL DO NOTHING`,
+			 ON CONFLICT (device_id, alarm_type, level) WHERE ack_at IS NULL DO NOTHING`,
 			deviceID, deviceName, metric, level, msg, fmt.Sprintf("%.1f", value), thr)
 		if err != nil {
 			slog.Error("alarm insert failed", "dev", deviceName, "err", err)
 		} else if tag.RowsAffected() > 0 {
 			slog.Warn("alarm", "dev", deviceName, "metric", metric, "level", level)
+		} else {
+			slog.Debug("alarm suppressed (duplicate unacked)", "dev", deviceName, "metric", metric)
 		}
 	}
 	return rows.Err()
@@ -106,12 +110,30 @@ func buildAlarmMsg(deviceName, metric string, value float64, cond string, thresh
 // used by Evaluate). Deduplicates atomically via INSERT ... ON CONFLICT
 // DO NOTHING on the partial unique index (device_id, alarm_type)
 // WHERE ack_at IS NULL.
-func (e *Engine) AlertOffline(ctx context.Context, deviceID int, deviceName string) error {
-	msg := fmt.Sprintf("%s 设备离线，网络连接已断开超过 10 分钟", deviceName)
+func (e *Engine) AlertOffline(ctx context.Context, deviceID int, deviceName string, offlineThresholdMinutes int) error {
+	msg := fmt.Sprintf("%s 设备离线，网络连接已断开超过 %d 分钟", deviceName, offlineThresholdMinutes)
 	tag, err := e.pool.Exec(ctx,
 		`INSERT INTO alarm_log (device_id,device_name,alarm_type,level,message,value,threshold,created_at)
 		 VALUES($1,$2,'离线','warning',$3,'','',NOW())
-		 ON CONFLICT (device_id, alarm_type) WHERE ack_at IS NULL DO NOTHING`,
+		 ON CONFLICT (device_id, alarm_type, level) WHERE ack_at IS NULL DO NOTHING`,
+		deviceID, deviceName, msg)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		slog.Warn("alarm: device offline", "dev", deviceName)
+	}
+	return nil
+}
+
+// AlertOfflineTx creates an offline alarm using the given transaction connection,
+// ensuring the alarm write participates in the caller's transaction.
+func (e *Engine) AlertOfflineTx(ctx context.Context, tx postgres.DBTX, deviceID int, deviceName string, offlineThresholdMinutes int) error {
+	msg := fmt.Sprintf("%s 设备离线，网络连接已断开超过 %d 分钟", deviceName, offlineThresholdMinutes)
+	tag, err := tx.Exec(ctx,
+		`INSERT INTO alarm_log (device_id,device_name,alarm_type,level,message,value,threshold,created_at)
+		 VALUES($1,$2,'离线','warning',$3,'','',NOW())
+		 ON CONFLICT (device_id, alarm_type, level) WHERE ack_at IS NULL DO NOTHING`,
 		deviceID, deviceName, msg)
 	if err != nil {
 		return err

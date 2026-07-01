@@ -1,4 +1,4 @@
-﻿package auth
+package auth
 
 import (
 	"context"
@@ -7,6 +7,9 @@ import (
 
 // RoleSuperAdmin is the system role code for the super administrator.
 const RoleSuperAdmin = "super_admin"
+
+// RoleAdmin is the platform administrator role code (level 10).
+const RoleAdmin = "admin"
 
 // Perm groups all permission code constants. Use auth.Perm.ProjectView etc.
 var Perm = struct {

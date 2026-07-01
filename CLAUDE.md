@@ -88,7 +88,7 @@ xmeco-new/
 ├── internal/
 │   ├── api/
 │   │   ├── handler/                   # HTTP Handler — 参数解析→调用Service/Repo→序列化响应
-│   │   │   ├── models.go              # M()/pathID/queryInt/writeJSON 公共工具
+│   │   │   ├── models.go              # M()/pathID/queryInt/writeJSON 公共工具 + GatewayManager/HardwareDispatcher 接口
 │   │   │   ├── admin.go               # 用户/代理商/角色/权限 CRUD
 │   │   │   ├── alarm.go               # 告警规则 + 日志
 │   │   │   ├── auth.go                # 登录 + Me
@@ -96,7 +96,6 @@ xmeco-new/
 │   │   │   ├── intelligence.go        # 智能分析 + 电能质量 + 电表
 │   │   │   ├── log.go                 # 遥测/控制日志 + CSV 导出
 │   │   │   ├── maintenance.go         # 维保记录 CRUD
-│   │   │   ├── models.go              # Building/Device/Property/Register CRUD
 │   │   │   ├── project.go             # 项目 CRUD + 用户分配
 │   │   │   ├── startup.go             # 启停计划 + 定时任务
 │   │   │   ├── telemetry.go           # 实时/历史遥测
@@ -122,6 +121,8 @@ xmeco-new/
 │       ├── migration/                 # Go embed 自动迁移 (16个版本)
 │       ├── orchestrator/              # 启停编排 + 联锁检查
 │       └── telemetry/poller.go        # Modbus 轮询 → 解码 → Batch 写入 → 告警
+│   ├── safego/
+│   │   └── safego.go                   # safego.Go — goroutine panic 恢复公共工具
 ├── web/admin/
 │   ├── src/
 │   │   ├── App.tsx                    # 管理后台路由（/login → 14页面）
@@ -171,7 +172,7 @@ HTTP Request
 
 ### 横向层（独立于 HTTP 请求）
 - **Gateway Layer**：Manager → TCP 监听 → 设备注册 → pollLoop → Modbus 读写 → 遥测落库
-- **Background Tasks**（5 个常驻 goroutine，均有 `defer recover()`）：设备轮询、告警评估、离线检测(1min)、定时启停(1min)、数据清理(24h)
+- **Background Tasks**（3 个常驻 goroutine，均通过 `safego.Go` 启动带 panic 恢复）：数据清理(24h)、离线检测(1min)、定时启停(1min)
 
 ### 数据流
 ```
@@ -357,7 +358,7 @@ npm run type-check                      # 类型检查
 | `service/telemetry/poller.go` | 核心采集链路，decodeVal 涉及多字节序/掩码/倍率 |
 | `service/alarm/engine.go` | 告警去重依赖部分唯一索引，修改 ON CONFLICT 语句注意索引条件 |
 | `config/config.go` | JWT 密钥缺省触发 `os.Exit(1)`，测试必须 `os.Setenv` |
-| `cmd/server/main.go` | 路由注册 + 5 goroutine，新增路由须注册权限码，修改 goroutine 须确保 `defer recover()` |
+| `cmd/server/main.go` | 路由注册 + 3 goroutine（均通过 `safego.Go` 启动），新增路由须注册权限码 |
 
 ### 10.3 新增功能标准步骤
 
@@ -404,7 +405,7 @@ Handler ──────► Service ──────► Repository ───
 | CORS | 顶层 mux 经过 CORS 中间件 |
 | 日志 | 所有错误路径 `slog.Warn/Error` |
 | 超时 | 任何 TCP/HTTP 外部调用必须有超时 |
-| panic恢复 | 所有后台 goroutine 必须 `defer recover()` |
+| panic恢复 | 所有后台 goroutine 必须通过 `safego.Go(name, ctx, fn)` 启动 |
 
 ### 10.6 禁止事项
 
@@ -523,7 +524,7 @@ func registerRoutes(db *postgres.DB, rl *middleware.RateLimiter, authSvc *auth.S
 }
 ```
 
-⚠️ **Handler 与 Repository 不可混用。** 如果创建了 Repo，Handler 必须通过 Repo 访问数据库，不要直接持有 `*pgxpool.Pool`。当前 `DashboardHandler/LogHandler/StartupHandler` 直接 SQL 是历史遗留。
+⚠️ **Handler 与 Repository 不可混用。** 如果创建了 Repo，Handler 必须通过 Repo 访问数据库，不要直接持有 `*pgxpool.Pool`。当前 `AlarmHandler/TelemetryHandler/LogHandler/DashboardHandler/StartupHandler/MaintenanceHandler` 直接 SQL 是历史遗留（有 plan 但未执行拆离）。
 
 ---
 
@@ -556,10 +557,14 @@ func registerRoutes(db *postgres.DB, rl *middleware.RateLimiter, authSvc *auth.S
 
 ## 14. 项目状态
 
-> 最后更新：2026-06-27
+> 最后更新：2026-06-28
 
 ### 已完成
 - 后端 95 条路由 + 24 张表 + 16 个迁移版本，安全加固（CORS/JWT/SQL注入/空指针/密码脱敏）
+- 深度代码审查 + 修复：SQL 确定性删除、写功能码告警、日期参数校验、queryInt/pathID 语义修正
+- 架构改进：`safego.Go` 公共 goroutine 工具、`HardwareDispatcher` 接口解耦 DeviceHandler-StartupHandler
+- 智能算法常量化：`copGainPerDegreeC`/`saveKWPerDegreeC`/`minApproachTemp` 替代魔法数字
+- 清理：删除冗余文件（AGENTS.md、旧报告、日志、二进制），完善 .gitignore
 - Web 大屏：深色全屏 + 设备拓扑 + 实时数据 + 天气/告警/能耗 + 传感器+历史图表
 - Web 管理后台：15 个页面框架，登录+CRUD 可用
 - 小程序：7 个页面（登录/设备/详情/告警/历史/我的）
@@ -571,18 +576,17 @@ func registerRoutes(db *postgres.DB, rl *middleware.RateLimiter, authSvc *auth.S
 |---|---|---|
 | B-01 | 大屏 5s 轮询对 DB 压力（每次 8+ SQL） | 待引入 WebSocket 或缓存 |
 | B-02 | 后端需手动重启，无热重载 | 可用 `air` 工具 |
-| B-03 | `server.exe` 未重新编译（最新改动不在 exe 中） | 需 `go build -o server.exe` |
-| B-04 | DataCenter N+1 请求（每设备单独请求 /properties） | 待新增批量接口 |
+| B-03 | DataCenter N+1 请求（每设备单独请求 /properties） | 待新增批量接口 |
 
 ### 下一步
 
 | 优先级 | 任务 |
 |---|---|
-| P0 | 重新编译 server.exe |
 | P0 | 大屏维保中心/任务中心 Tab 实现 |
 | P1 | WebSocket 实时推送（替换 5s 轮询） |
 | P1 | 告警通知渠道（短信/公众号/邮件） |
 | P1 | 设备控制闭环（Modbus 写后读回确认） |
+| P1 | Handler 直接 SQL 拆离到 Repository（AlarmHandler 等 6 个） |
 
 ---
 

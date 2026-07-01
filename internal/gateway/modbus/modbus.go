@@ -1,4 +1,4 @@
-﻿package modbus
+package modbus
 
 var crc16Table [256]uint16
 
@@ -40,11 +40,11 @@ func BuildReadCommand(devAddr byte, funcCode byte, startAddr uint16, count uint1
 	return buf
 }
 
-// BuildWriteSingleCommand builds func 06 - write single register
-func BuildWriteSingleCommand(devAddr byte, addr uint16, value uint16) []byte {
+// BuildWriteSingleCommand builds func 05/06 - write single coil/register
+func BuildWriteSingleCommand(devAddr byte, funcCode byte, addr uint16, value uint16) []byte {
 	buf := make([]byte, 8)
 	buf[0] = devAddr
-	buf[1] = 0x06
+	buf[1] = funcCode
 	buf[2] = byte(addr >> 8)
 	buf[3] = byte(addr)
 	buf[4] = byte(value >> 8)
@@ -127,10 +127,11 @@ func CodeFromStr(s string) byte {
 func BuildWriteCommand(devAddr byte, funcCode byte, addr uint16, count uint16, value uint16) []byte {
 	switch funcCode {
 	case 0x05, 0x06:
-		return BuildWriteSingleCommand(devAddr, addr, value)
+		return BuildWriteSingleCommand(devAddr, funcCode, addr, value)
 	case 0x10, 0x0F:
 		return BuildWriteMultiCommand(devAddr, addr, count, []byte{byte(value >> 8), byte(value)})
 	default:
-		return BuildWriteSingleCommand(devAddr, addr, value)
+		// Unknown function code: fall back to write single register (0x06)
+		return BuildWriteSingleCommand(devAddr, 0x06, addr, value)
 	}
 }

@@ -1,4 +1,4 @@
-﻿package postgres
+package postgres
 
 import (
 	"context"
@@ -71,10 +71,10 @@ func (r *AdminRepo) ListUsers(ctx context.Context) ([]domain.AdminUser, error) {
 func (r *AdminRepo) CreateUser(ctx context.Context, req domain.CreateUserReq, passwordHash string) (*domain.AdminUser, error) {
 	var u domain.AdminUser
 	err := r.pool.QueryRow(ctx, `
-		INSERT INTO users (username, password_hash, role_id, agent_id, default_project_id)
-		VALUES ($1,$2,$3,$4,$5)
+		INSERT INTO users (username, password_hash, role_id, agent_id, default_project_id, remark)
+		VALUES ($1,$2,$3,$4,$5,$6)
 		RETURNING id, created_at`,
-		req.Username, passwordHash, req.RoleID, req.AgentID, req.DefaultProjectID,
+		req.Username, passwordHash, req.RoleID, req.AgentID, req.DefaultProjectID, req.Remark,
 	).Scan(&u.ID, &u.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -83,19 +83,27 @@ func (r *AdminRepo) CreateUser(ctx context.Context, req domain.CreateUserReq, pa
 	u.RoleID = req.RoleID
 	u.AgentID = req.AgentID
 	u.DefaultProjectID = req.DefaultProjectID
+	u.Remark = req.Remark
 	u.IsActive = true
 	return &u, nil
 }
 
-func (r *AdminRepo) UpdateUser(ctx context.Context, id int, roleID int, agentID *int, isActive bool, remark *string) error {
+func (r *AdminRepo) UpdateUser(ctx context.Context, id int, roleID int, agentID *int, isActive *bool, remark *string, defaultProjectID *int) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE users SET
 		  role_id = CASE WHEN $1 = 0 THEN role_id ELSE $1 END,
 		  agent_id = COALESCE($2, agent_id),
-		  is_active = $3,
-		  remark = COALESCE($4, remark)
+		  is_active = COALESCE($3, is_active),
+		  remark = COALESCE($4, remark),
+		  default_project_id = CASE WHEN $6::int IS NOT NULL THEN NULLIF($6::int, 0) ELSE default_project_id END
 		WHERE id=$5`,
-		roleID, agentID, isActive, remark, id)
+		roleID, agentID, isActive, remark, id, defaultProjectID)
+	return err
+}
+
+// IncrementTokenVersion increments the token_version for a user, invalidating all existing JWTs.
+func (r *AdminRepo) IncrementTokenVersion(ctx context.Context, id int) error {
+	_, err := r.pool.Exec(ctx, `UPDATE users SET token_version = token_version + 1 WHERE id=$1`, id)
 	return err
 }
 

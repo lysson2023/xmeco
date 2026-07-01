@@ -11,7 +11,9 @@ export function isTokenExpired(token: string): boolean {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return true;
-    const payload = JSON.parse(atob(parts[1]));
+    // Normalize base64url to base64 (JWT uses base64url encoding)
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(base64));
     const exp = Number(payload.exp);
     if (!Number.isFinite(exp) || exp <= 0) return true;
     return exp * 1000 < Date.now();

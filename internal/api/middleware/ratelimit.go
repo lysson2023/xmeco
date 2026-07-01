@@ -1,8 +1,11 @@
 package middleware
 
 import (
+	"math"
 	"net"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,8 +23,8 @@ type RateLimiter struct {
 }
 
 type bucket struct {
-	count    int
-	resetAt  time.Time
+	count   int
+	resetAt time.Time
 }
 
 // NewRateLimiter creates a rate limiter. limit is the max number of attempts
@@ -72,11 +75,18 @@ func (rl *RateLimiter) LimitLogin(next http.HandlerFunc) http.HandlerFunc {
 		}
 		b.count++
 		remaining := rl.limit - b.count
-		rl.mu.Unlock()
 		if remaining < 0 {
-			http.Error(w, `{"error":"请求过于频繁，请稍后再试"}`, http.StatusTooManyRequests)
+			retryAfter := strconv.Itoa(int(math.Ceil(time.Until(b.resetAt).Seconds())))
+			rl.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", retryAfter)
+			w.WriteHeader(http.StatusTooManyRequests)
+			if _, err := w.Write([]byte("{\"error\":\"请求过于频繁，请稍后再试\"}")); err != nil {
+				slog.Warn("ratelimit write failed", "err", err)
+			}
 			return
 		}
+		rl.mu.Unlock()
 		next(w, r)
 	}
 }
@@ -101,7 +111,7 @@ func (rl *RateLimiter) isTrustedProxy(remoteAddr string) bool {
 
 // clientIP extracts the real client IP. When trustProxy is enabled, X-Forwarded-For
 // and X-Real-IP headers are only honored if the immediate remote peer is a trusted
-// proxy — otherwise RemoteAddr is used directly, preventing IP spoofing.
+// proxy 鈥?otherwise RemoteAddr is used directly, preventing IP spoofing.
 func (rl *RateLimiter) clientIP(r *http.Request) string {
 	if rl.trustProxy && rl.isTrustedProxy(r.RemoteAddr) {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {

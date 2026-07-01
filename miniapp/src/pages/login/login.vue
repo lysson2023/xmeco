@@ -23,12 +23,10 @@
 </view>
 </template>
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref } from 'vue';
 import { api } from '../../api/client';
 const username = ref(''), password = ref(''), loading = ref(false);
-onMounted(() => {
-  // 全局登录守卫在 App.vue 中统一处理，此处不再重复检查避免竞态
-});
+// 全局登录守卫在 App.vue 中统一处理，此处不再重复检查避免竞态
 const doLogin = async () => {
   if (!username.value || !password.value) { uni.showToast({ title: '请输入用户名和密码', icon: 'none' }); return; }
   loading.value = true;

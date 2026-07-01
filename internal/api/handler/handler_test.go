@@ -499,12 +499,8 @@ func TestAuthHandler_Login(t *testing.T) {
 					WithArgs("testuser").
 					WillReturnRows(pgxmock.NewRows([]string{
 						"id", "username", "password_hash", "role_id", "code", "level",
-						"agent_id", "default_project_id", "is_active",
-					}).AddRow(1, "testuser", validHash, 1, "admin", 10, nil, nil, true))
-				mock.ExpectQuery("SELECT p\\.code FROM permission").
-					WithArgs(1).
-					WillReturnRows(pgxmock.NewRows([]string{"code"}).
-						AddRow("device.view").AddRow("device.control"))
+						"agent_id", "default_project_id", "is_active", "token_version", "perms",
+					}).AddRow(1, "testuser", validHash, 1, "admin", 10, nil, nil, true, 0, "device.view,device.control"))
 				mock.ExpectExec("UPDATE users SET last_login_at").
 					WithArgs(1).
 					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
@@ -688,8 +684,9 @@ func TestAdminHandler_UpdateUser(t *testing.T) {
 			body:   `{"is_active":false}`,
 			claims: &auth.Claims{UserID: 1, Username: "admin", RoleCode: "super_admin"},
 			mockSetup: func(mock pgxmock.PgxPoolIface) {
+				isActiveFalse := false
 				mock.ExpectExec("UPDATE users SET").
-					WithArgs(0, nilInt, false, nilStr, 3).
+					WithArgs(0, nilInt, &isActiveFalse, nilStr, 3, (*int)(nil)).
 					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 			},
 			wantStatus: http.StatusOK,
@@ -711,7 +708,7 @@ func TestAdminHandler_UpdateUser(t *testing.T) {
 			claims: &auth.Claims{UserID: 5, Username: "user5", RoleCode: "admin"},
 			mockSetup: func(mock pgxmock.PgxPoolIface) {
 				mock.ExpectExec("UPDATE users SET").
-					WithArgs(2, nilInt, true, nilStr, 5).
+					WithArgs(2, nilInt, (*bool)(nil), nilStr, 5, (*int)(nil)).
 					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 			},
 			wantStatus: http.StatusOK,
@@ -789,7 +786,7 @@ func TestAdminHandler_UpdateUser_DuplicateUsername(t *testing.T) {
 
 	// Expect CreateUser call - mock will fail with duplicate key error
 	mock.ExpectQuery("INSERT INTO users").
-		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(errors.New("duplicate key value violates unique constraint"))
 
 	h.CreateUser(rec, req)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState, useCallback } from 'react';
 import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, Switch } from 'antd';
 import { PlusOutlined, KeyOutlined, EditOutlined } from '@ant-design/icons';
 import api from '../api/client';
@@ -10,24 +10,28 @@ export default function Users() {
   const [editOpen, setEditOpen] = useState(false);
   const [pwdOpen, setPwdOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
+  const [editKey, setEditKey] = useState(0);
   const [pwdUserId, setPwdUserId] = useState<number | null>(null);
   const [roles, setRoles] = useState<any[]>([]);
   const [agents, setAgents] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
   const [filterRole, setFilterRole] = useState<number | null>(null);
   const [filterAgent, setFilterAgent] = useState<number | null>(null);
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
   const [pwdForm] = Form.useForm();
 
-  const fetch = async () => {
+  const fetch = useCallback(async () => {
     setLoading(true);
     try {
-      const [u, r, a] = await Promise.all([api.get('/users'), api.get('/roles'), api.get('/agents')]);
-      setData(u.data); setRoles(r.data); setAgents(a.data);
+      const [u, r, a, p] = await Promise.all([
+        api.get('/users'), api.get('/roles'), api.get('/agents'), api.get('/projects'),
+      ]);
+      setData(u.data); setRoles(r.data); setAgents(a.data); setProjects(p.data);
     } catch { message.error('加载失败'); }
     finally { setLoading(false); }
-  };
-  useEffect(() => { fetch(); }, []);
+  }, []);
+  useEffect(() => { fetch(); }, [fetch]);
 
   const filteredData = data.filter(u => {
     if (filterRole && Number(u.role_id) !== filterRole) return false;
@@ -35,9 +39,22 @@ export default function Users() {
     return true;
   });
 
+  const getProjectName = (pid: number | null) => {
+    if (!pid) return '-';
+    const p = projects.find((p: any) => p.id === pid);
+    return p ? p.name : '-';
+  };
+
   const save = async (v: any) => {
     try {
-      await api.post('/users', v);
+      await api.post('/users', {
+        username: v.username,
+        password: v.password,
+        role_id: v.role_id,
+        agent_id: v.agent_id ?? null,
+        default_project_id: v.default_project_id ?? null,
+        remark: v.remark,
+      });
       message.success('创建成功');
       setModalOpen(false); form.resetFields(); fetch();
     } catch { message.error('创建失败'); }
@@ -45,13 +62,19 @@ export default function Users() {
 
   const saveEdit = async (v: any) => {
     try {
-      await api.put('/users/'+editing.id, { role_id: v.role_id, agent_id: v.agent_id, is_active: v.is_active, remark: v.remark });
+      await api.put('/users/' + editing.id, {
+        role_id: v.role_id,
+        agent_id: v.agent_id,
+        is_active: v.is_active,
+        remark: v.remark,
+        default_project_id: v.default_project_id != null ? v.default_project_id : 0,
+      });
       if (v.password) {
         try {
-          await api.post('/users/'+editing.id+'/reset-password', { old_password: '', new_password: v.password });
+          await api.post('/users/' + editing.id + '/reset-password', { old_password: '', new_password: v.password });
         } catch {
           message.warning('用户信息已更新，但密码修改失败');
-          setEditOpen(false); setEditing(null); fetch();
+          closeEdit(); fetch();
           return;
         }
       }
@@ -59,12 +82,24 @@ export default function Users() {
     } catch {
       message.error('更新失败');
     }
-    setEditOpen(false); setEditing(null); fetch();
+    closeEdit(); fetch();
+  };
+
+  const closeEdit = () => {
+    setEditOpen(false);
+    setEditing(null);
+    editForm.resetFields();
+  };
+
+  const openEdit = (r: any) => {
+    setEditing(r);
+    setEditKey(k => k + 1);
+    setEditOpen(true);
   };
 
   const toggleActive = async (id: number, checked: boolean, r: any) => {
     try {
-      await api.put('/users/'+id, { role_id: r.role_id, agent_id: r.agent_id, is_active: checked });
+      await api.put('/users/' + id, { role_id: r.role_id, agent_id: r.agent_id, is_active: checked });
       message.success(checked ? '已启用' : '已禁用');
       fetch();
     } catch { message.error('操作失败'); }
@@ -72,14 +107,14 @@ export default function Users() {
 
   const resetPwd = async (v: { old_password: string; new_password: string }) => {
     try {
-      await api.post('/users/'+pwdUserId+'/reset-password', v);
+      await api.post('/users/' + pwdUserId + '/reset-password', v);
       message.success('密码已重置');
       setPwdOpen(false); pwdForm.resetFields();
     } catch { message.error('密码重置失败'); }
   };
 
   const del = async (id: number) => {
-    try { await api.delete('/users/'+id); message.success('已删除'); fetch(); }
+    try { await api.delete('/users/' + id); message.success('已删除'); fetch(); }
     catch { message.error('删除失败'); }
   };
 
@@ -92,6 +127,7 @@ export default function Users() {
     )},
     { title: '角色', dataIndex: 'role_name' },
     { title: '代理商', dataIndex: 'agent_name', render: (v: string | null) => v || '-' },
+    { title: '默认项目', dataIndex: 'default_project_id', render: (v: number | null) => getProjectName(v) },
     { title: '备注', dataIndex: 'remark', render: (v: string | null) => v || '-' },
     { title: '状态', dataIndex: 'is_active', width: 80, render: (v: boolean, r: any) =>
       <Switch checked={v} onChange={(c: boolean) => toggleActive(r.id, c, r)} checkedChildren="启用" unCheckedChildren="禁用" />
@@ -100,7 +136,7 @@ export default function Users() {
     { title: '创建时间', dataIndex: 'created_at', render: (v: string) => v?.slice(0, 10) },
     { title: '操作', render: (_: any, r: any) => (
       <Space>
-        <a onClick={() => { setEditing(r); editForm.setFieldsValue(r); setEditOpen(true); }}><EditOutlined /> 编辑</a>
+        <a onClick={() => openEdit(r)}><EditOutlined /> 编辑</a>
         <a onClick={() => { setPwdUserId(r.id); pwdForm.resetFields(); setPwdOpen(true); }}><KeyOutlined /> 重置密码</a>
         <Popconfirm title="确定删除?" onConfirm={() => del(r.id)}><a style={{ color: 'red' }}>删除</a></Popconfirm>
       </Space>
@@ -130,18 +166,43 @@ export default function Users() {
           <Form.Item name="agent_id" label="代理商">
             <Select allowClear options={agents.map((a: any) => ({ value: a.id, label: a.name }))} />
           </Form.Item>
+          <Form.Item name="default_project_id" label="默认项目">
+            <Select allowClear placeholder="选择默认项目（可选）" options={projects.map((p: any) => ({ value: p.id, label: p.name }))} />
+          </Form.Item>
           <Form.Item name="remark" label="备注"><Input.TextArea rows={2} /></Form.Item>
         </Form>
       </Modal>
 
-      <Modal title="编辑用户" open={editOpen} onOk={editForm.submit} onCancel={() => setEditOpen(false)}>
-        <Form form={editForm} layout="vertical" onFinish={saveEdit}>
+      <Modal
+        key={editKey}
+        title="编辑用户"
+        open={editOpen}
+        onOk={editForm.submit}
+        onCancel={closeEdit}
+        destroyOnClose
+      >
+        <Form
+          form={editForm}
+          layout="vertical"
+          onFinish={saveEdit}
+          initialValues={editing ? {
+            password: undefined,
+            role_id: editing.role_id,
+            agent_id: editing.agent_id,
+            is_active: editing.is_active,
+            remark: editing.remark,
+            default_project_id: editing.default_project_id,
+          } : {}}
+        >
           <Form.Item name="password" label="密码（留空则不修改）"><Input placeholder="留空则不修改密码" /></Form.Item>
           <Form.Item name="role_id" label="角色" rules={[{ required: true }]}>
             <Select options={roles.map((r: any) => ({ value: r.id, label: r.name }))} />
           </Form.Item>
           <Form.Item name="agent_id" label="代理商">
             <Select allowClear options={agents.map((a: any) => ({ value: a.id, label: a.name }))} />
+          </Form.Item>
+          <Form.Item name="default_project_id" label="默认项目">
+            <Select allowClear placeholder="选择默认项目" options={projects.map((p: any) => ({ value: p.id, label: p.name }))} />
           </Form.Item>
           <Form.Item name="is_active" label="启用" valuePropName="checked"><Switch /></Form.Item>
           <Form.Item name="remark" label="备注"><Input.TextArea rows={2} /></Form.Item>

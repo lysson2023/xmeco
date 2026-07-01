@@ -184,9 +184,12 @@ func TestAdminHandler_ResetPassword(t *testing.T) {
 				repo = postgres.NewAdminRepo(nil) // nil DB will panic if accessed
 			}
 
-			// authSvc 在 ResetPassword 中仅用于 auth.RoleSuperAdmin 常量比较
-			// HashPassword/CheckPassword 是包级函数，不依赖 authSvc 实例
-			h := NewAdminHandler(repo, nil)
+			// authSvc 用于 ResetPassword 中的 token_version 递增（需 Pool()）
+			var authSvc *auth.Service
+			if mock != nil {
+				authSvc = auth.New(mock, "test-secret")
+			}
+			h := NewAdminHandler(repo, authSvc)
 
 			// 构造包含 claims 的 context
 			ctx := context.Background()

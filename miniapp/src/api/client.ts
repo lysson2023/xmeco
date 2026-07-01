@@ -1,11 +1,11 @@
 // 小程序环境中 uni.request 要求绝对 HTTPS URL
 // H5 模式使用相对路径即可（浏览器自动补全域名）
-// 原生小程序构建时应替换为实际服务器地址
 // #ifdef H5
 const BASE = '/api/v1'
 // #endif
 // #ifndef H5
-const BASE = 'https://api.example.com/api/v1' // TODO: 替换为实际 API 地址
+// 生产环境API地址 - 请根据实际部署情况修改
+const BASE = 'https://xmeco.highaltitude.cn/api/v1'
 // #endif
 const REQUEST_TIMEOUT = 15000
 let token = ''
@@ -15,7 +15,12 @@ type HttpMethod = 'OPTIONS' | 'GET' | 'HEAD' | 'POST' | 'PUT' | 'DELETE' | 'TRAC
 
 // AuthError 表示因认证过期而触发的错误，页面 catch 中应跳过 Toast 提示
 export class AuthError extends Error {
-  constructor(msg: string) { super(msg); this.name = 'AuthError' }
+  constructor(msg: string) {
+    super(msg)
+    this.name = 'AuthError'
+    // 修复 ES5 转译下 instanceof 检查失败的问题
+    Object.setPrototypeOf(this, AuthError.prototype)
+  }
 }
 
 function handle401() {

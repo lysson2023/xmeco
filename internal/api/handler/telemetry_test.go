@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/pashagolub/pgxmock/v4"
+
+	"xmeco/internal/repository/postgres"
 )
 
 // =============================================================================
@@ -71,7 +73,7 @@ func TestTelemetryHandler_Realtime(t *testing.T) {
 			defer mock.Close()
 			tt.mockSetup(mock)
 
-			h := NewTelemetryHandler(mock)
+			h := NewTelemetryHandler(postgres.NewTelemetryRepo(mock))
 			req := httptest.NewRequest("GET", "/api/v1/telemetry/realtime"+tt.queryStr, nil)
 			rec := httptest.NewRecorder()
 			h.Realtime(rec, req)
@@ -130,7 +132,7 @@ func TestTelemetryHandler_History(t *testing.T) {
 			defer mock.Close()
 			tt.mockSetup(mock)
 
-			h := NewTelemetryHandler(mock)
+			h := NewTelemetryHandler(postgres.NewTelemetryRepo(mock))
 			req := httptest.NewRequest("GET", "/api/v1/telemetry/history"+tt.queryStr, nil)
 			rec := httptest.NewRecorder()
 			h.History(rec, req)
@@ -200,7 +202,7 @@ func TestTelemetryHandler_Stats(t *testing.T) {
 			defer mock.Close()
 			tt.mockSetup(mock)
 
-			h := NewTelemetryHandler(mock)
+			h := NewTelemetryHandler(postgres.NewTelemetryRepo(mock))
 			req := httptest.NewRequest("GET", "/api/v1/telemetry/stats"+tt.queryStr, nil)
 			rec := httptest.NewRecorder()
 			h.Stats(rec, req)

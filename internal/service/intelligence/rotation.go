@@ -13,9 +13,8 @@ func (s *Service) rotationPlan(ctx context.Context) []RotationItem {
 	// Single query approach (avoids N+1): JOIN device with control_record on device_name.
 	// Run-hours are estimated from control_record count (1 record ≈ 1 hour runtime)
 	// because snapshot_after start/stop timestamps are not yet populated.
-	// NOTE: control_record has no device_id FK, so we match by device_name.
-	// If two devices share a name, their counts will be merged — this is a known
-	// limitation until a device_id column is added to control_record.
+	// NOTE: control_record.device_id 已在 migration 000017 添加，但旧数据可能为 NULL，
+	// 此处仍按 device_name 匹配以确保兼容性。
 	rows, err := s.pool.Query(ctx,
 		`SELECT d.id, d.name, d.device_type,
 		 COALESCE(COUNT(c.id), 0)::float8 as run_hours
@@ -45,10 +44,17 @@ func (s *Service) rotationPlan(ctx context.Context) []RotationItem {
 		}
 		byType[d.dtype] = append(byType[d.dtype], d)
 	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("rotationPlan rows iteration error", "err", err)
+		return nil
+	}
 
 	var items []RotationItem
 	for _, devs := range byType {
-		if len(devs) <= 1 {
+		if len(devs) == 0 {
+			continue
+		}
+		if len(devs) == 1 {
 			items = append(items, RotationItem{
 				DeviceID: devs[0].id, DeviceName: devs[0].name, DeviceType: devs[0].dtype,
 				RunHours: round2(devs[0].hours), Priority: 1,

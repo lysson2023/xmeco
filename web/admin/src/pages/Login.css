@@ -248,6 +248,7 @@
 }
 .input-wrap {
   position: relative;
+  padding: 0 16px;
 }
 .login-input {
   width: 100%;

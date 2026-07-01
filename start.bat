@@ -20,10 +20,10 @@ start "XMECO-Backend" cmd /c "set XMECO_DEV_MODE=true && set XMECO_DB_SSLMODE=di
 timeout /t 3 /nobreak >nul
 
 echo [2/3] Starting admin panel (port 3000)...
-start "XMECO-Admin" cmd /c "cd /d %~dp0web\admin && npm run dev"
+start "XMECO-Admin" /D "%~dp0web\admin" npx.cmd vite --host 0.0.0.0
 
 echo [3/3] Starting big screen (port 3001)...
-start "XMECO-Screen" cmd /c "cd /d %~dp0web\admin && npm run dev:screen"
+start "XMECO-Screen" /D "%~dp0web\admin" npx.cmd vite screen-src --host 0.0.0.0
 
 echo.
 echo ============================================

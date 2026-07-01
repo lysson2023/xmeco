@@ -1,4 +1,4 @@
-﻿package postgres
+package postgres
 
 import (
 	"context"
@@ -89,6 +89,36 @@ func (r *DeviceRepo) Update(ctx context.Context, d *domain.Device) error {
 func (r *DeviceRepo) Delete(ctx context.Context, id int) error {
 	_, err := r.pool.Exec(ctx, "DELETE FROM device WHERE id=$1", id)
 	return err
+}
+
+// DeviceGatewayRef is a lightweight device reference used by the gateway layer.
+type DeviceGatewayRef struct {
+	DeviceID   int
+	DeviceNo   int
+	DeviceType string
+	DeviceName string
+	NodeAddr   int
+}
+
+// ListByGatewayIMEI returns devices linked to a specific gateway IMEI.
+func (r *DeviceRepo) ListByGatewayIMEI(ctx context.Context, imei string) ([]DeviceGatewayRef, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, device_no, device_type, COALESCE(name,''), node_address
+		 FROM device WHERE gateway_imei=$1 AND gateway_imei IS NOT NULL AND gateway_imei!=''`, imei)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var devs []DeviceGatewayRef
+	for rows.Next() {
+		var d DeviceGatewayRef
+		if err := rows.Scan(&d.DeviceID, &d.DeviceNo, &d.DeviceType, &d.DeviceName, &d.NodeAddr); err != nil {
+			slog.Warn("ListByGatewayIMEI scan failed", "gw", imei, "err", err)
+			continue
+		}
+		devs = append(devs, d)
+	}
+	return devs, rows.Err()
 }
 
 // ===== PROPERTY =====

@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react';
-import { Card, Checkbox, Button, message, Space } from 'antd';
+import { Card, Checkbox, Button, message, Space, Spin } from 'antd';
 import { SaveOutlined } from '@ant-design/icons';
 import api from '../api/client';
 import type { Role, Permission } from '../types';
@@ -15,8 +15,10 @@ export default function Permissions() {
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [selectedRole, setSelectedRole] = useState<number | null>(null);
   const [checkedPerms, setCheckedPerms] = useState<number[]>([]);
+  const [loading, setLoading] = useState(false);
 
   const fetch = async () => {
+    setLoading(true);
     try {
       const [r, p] = await Promise.all([api.get('/roles'), api.get('/permissions')]);
       setRoles(r.data); setPermissions(p.data);
@@ -25,6 +27,8 @@ export default function Permissions() {
       }
     } catch {
       message.error('加载失败');
+    } finally {
+      setLoading(false);
     }
   };
   useEffect(() => { fetch(); }, []);
@@ -59,7 +63,7 @@ export default function Permissions() {
   };
 
   return (
-    <div>
+    <Spin spinning={loading}>
       <h2 style={{ marginBottom: 16 }}>权限管理</h2>
       <div style={{ display: 'flex', gap: 24 }}>
         <Card title="角色列表" size="small" style={{ width: 280 }}>
@@ -109,6 +113,6 @@ export default function Permissions() {
           {!selectedRole && <div style={{ color: '#999', padding: 40, textAlign: 'center' }}>请从左侧选择一个角色</div>}
         </Card>
       </div>
-    </div>
+    </Spin>
   );
 }

@@ -1,33 +1,38 @@
-﻿package handler
+package handler
 
 import (
 	"encoding/json"
-	"fmt"
-	"log/slog"
 	"net/http"
-
-	"github.com/jackc/pgx/v5"
 
 	"xmeco/internal/api/middleware"
 	"xmeco/internal/repository/postgres"
 )
 
-type AlarmHandler struct{ pool postgres.DBTX }
-func NewAlarmHandler(pool postgres.DBTX) *AlarmHandler { return &AlarmHandler{pool} }
+type AlarmHandler struct {
+	ruleRepo *postgres.AlarmRuleRepo
+	logRepo  *postgres.AlarmLogRepo
+}
+
+func NewAlarmHandler(ruleRepo *postgres.AlarmRuleRepo, logRepo *postgres.AlarmLogRepo) *AlarmHandler {
+	return &AlarmHandler{ruleRepo: ruleRepo, logRepo: logRepo}
+}
 
 func (h *AlarmHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 	deviceID := queryInt(r, "device_id")
-	var rows pgx.Rows
-	var err error
-	if deviceID > 0 {
-		rows, err = h.pool.Query(r.Context(), "SELECT id,name,device_id,property_id,device_type,metric,condition,threshold,level,target_value,min_value,max_value,notify_users,enabled FROM alarm_rule WHERE device_id=$1 ORDER BY id", deviceID)
-	} else {
-		rows, err = h.pool.Query(r.Context(), "SELECT id,name,device_id,property_id,device_type,metric,condition,threshold,level,target_value,min_value,max_value,notify_users,enabled FROM alarm_rule ORDER BY id")
+	list, err := h.ruleRepo.List(r.Context(), deviceID)
+	if err != nil {
+		serverErr(w, err)
+		return
 	}
-	if err != nil { serverErr(w, err); return }
-	defer rows.Close()
-	type rule struct {
-		ID          int      `json:"id"`
+	if list == nil {
+		list = []postgres.AlarmRule{}
+	}
+	ok(w, list)
+}
+
+func (h *AlarmHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
+	// 使用灵活的请求结构，处理enabled默认值
+	var body struct {
 		Name        string   `json:"name"`
 		DeviceID    *int     `json:"device_id"`
 		PropertyID  *int     `json:"property_id"`
@@ -40,178 +45,100 @@ func (h *AlarmHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 		MinValue    *string  `json:"min_value"`
 		MaxValue    *string  `json:"max_value"`
 		NotifyUsers []int    `json:"notify_users"`
-		Enabled     bool     `json:"enabled"`
+		Enabled     *bool    `json:"enabled"` // 使用指针判断是否显式设置
 	}
-	var list []rule
-	for rows.Next() {
-		var rr rule
-		if err := rows.Scan(&rr.ID, &rr.Name, &rr.DeviceID, &rr.PropertyID, &rr.DeviceType, &rr.Metric, &rr.Condition, &rr.Threshold, &rr.Level, &rr.TargetValue, &rr.MinValue, &rr.MaxValue, &rr.NotifyUsers, &rr.Enabled); err != nil {
-			slog.Warn("ListRules scan failed", "err", err)
-			continue
-		}
-		list = append(list, rr)
-	}
-	if list == nil { list = []rule{} }
-	if err := rows.Err(); err != nil { serverErr(w, err); return }
-	ok(w, list)
-}
-
-type alarmRuleReq struct {
-	Name        string   `json:"name"`
-	DeviceID    *int     `json:"device_id"`
-	PropertyID  *int     `json:"property_id"`
-	DeviceType  *string  `json:"device_type"`
-	Metric      *string  `json:"metric"`
-	Condition   *string  `json:"condition"`
-	Threshold   *float64 `json:"threshold"`
-	Level       *string  `json:"level"`
-	TargetValue *string  `json:"target_value"`
-	MinValue    *string  `json:"min_value"`
-	MaxValue    *string  `json:"max_value"`
-	NotifyUsers []int    `json:"notify_users"`
-	Enabled     *bool    `json:"enabled"`
-}
-
-func (h *AlarmHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
-	var rr alarmRuleReq
-	if err := json.NewDecoder(r.Body).Decode(&rr); err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
-	if rr.Name == "" {
+	if body.Name == "" {
 		writeJSON(w, http.StatusBadRequest, M{"error": "规则名称不能为空"})
 		return
 	}
-	var id int
-	enabled := true
-	if rr.Enabled != nil {
-		enabled = *rr.Enabled
+
+	// 构造AlarmRule，处理enabled默认值
+	rr := postgres.AlarmRule{
+		Name:        body.Name,
+		DeviceID:    body.DeviceID,
+		PropertyID:  body.PropertyID,
+		DeviceType:  body.DeviceType,
+		Metric:      body.Metric,
+		Condition:   body.Condition,
+		Threshold:   body.Threshold,
+		Level:       body.Level,
+		TargetValue: body.TargetValue,
+		MinValue:    body.MinValue,
+		MaxValue:    body.MaxValue,
+		NotifyUsers: body.NotifyUsers,
 	}
-	err := h.pool.QueryRow(r.Context(),
-		"INSERT INTO alarm_rule (name,device_id,property_id,device_type,metric,condition,threshold,level,target_value,min_value,max_value,notify_users,enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id",
-		rr.Name, rr.DeviceID, rr.PropertyID, rr.DeviceType, rr.Metric, rr.Condition, rr.Threshold, rr.Level, rr.TargetValue, rr.MinValue, rr.MaxValue, rr.NotifyUsers, enabled).Scan(&id)
-	if err != nil { serverErr(w, err); return }
-	ok(w, map[string]any{"id": id})
+	// 显式设置enabled：如果body中没有该字段（nil），默认为true；否则使用传入值
+	if body.Enabled == nil {
+		rr.Enabled = true
+	} else {
+		rr.Enabled = *body.Enabled
+	}
+
+	// 直接调用repo，让repo使用rr.Enabled的值
+	// 但repo.Create现在总是传true，需要修改repo接受enabled参数
+	// 临时方案：根据rr.Enabled构造SQL参数
+	if err := h.ruleRepo.CreateWithEnabled(r.Context(), &rr, rr.Enabled); err != nil {
+		serverErr(w, err)
+		return
+	}
+	ok(w, map[string]any{"id": rr.ID})
 }
 
 func (h *AlarmHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
-	var rr alarmRuleReq
+	var rr postgres.AlarmRule
 	if err := json.NewDecoder(r.Body).Decode(&rr); err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
+		writeJSON(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
-	enabled := true
-	if rr.Enabled != nil {
-		enabled = *rr.Enabled
+	rr.ID = id
+	if err := h.ruleRepo.Update(r.Context(), &rr); err != nil {
+		serverErr(w, err)
+		return
 	}
-	_, err := h.pool.Exec(r.Context(),
-		"UPDATE alarm_rule SET name=$1,device_id=$2,property_id=$3,device_type=$4,metric=$5,condition=$6,threshold=$7,level=$8,target_value=$9,min_value=$10,max_value=$11,notify_users=$12,enabled=$13 WHERE id=$14",
-		rr.Name, rr.DeviceID, rr.PropertyID, rr.DeviceType, rr.Metric, rr.Condition, rr.Threshold, rr.Level, rr.TargetValue, rr.MinValue, rr.MaxValue, rr.NotifyUsers, enabled, id)
-	if err != nil { serverErr(w, err); return }
 	ok(w, M{"status": "updated"})
 }
 
 func (h *AlarmHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.pool.Exec(r.Context(), "DELETE FROM alarm_rule WHERE id=$1", pathID(r)); err != nil {
+	if err := h.ruleRepo.Delete(r.Context(), pathID(r)); err != nil {
 		serverErr(w, err)
 		return
 	}
-	ok(w, M{"status":"deleted"})
+	ok(w, M{"status": "deleted"})
 }
 
 func (h *AlarmHandler) ListLogs(w http.ResponseWriter, r *http.Request) {
-	deviceID := queryInt(r, "device_id")
-	buildingID := queryInt(r, "building_id")
-	projectID := queryInt(r, "project_id")
-	dateFrom := r.URL.Query().Get("date_from")
-	dateTo := r.URL.Query().Get("date_to")
-	today := r.URL.Query().Get("today") // "1" = today only
-
-	var rows pgx.Rows
-	var err error
-
-	// Build dynamic query for flexible filtering
-	baseQ := `SELECT al.id, al.device_id, al.device_name, al.alarm_type, al.level,
-		al.message, al.value, al.threshold,
-		COALESCE(al.created_at::text,''), COALESCE(al.ack_at::text,'')
-		FROM alarm_log al`
-	var conditions []string
-	var args []any
-	argIdx := 1
-
-	if buildingID > 0 || projectID > 0 {
-		baseQ += ` JOIN device d ON d.id = al.device_id`
-		if projectID > 0 {
-			baseQ += ` JOIN building b ON b.id = d.building_id`
-		}
+	filter := postgres.AlarmLogFilter{
+		DeviceID:   queryInt(r, "device_id"),
+		BuildingID: queryInt(r, "building_id"),
+		ProjectID:  queryInt(r, "project_id"),
+		DateFrom:   r.URL.Query().Get("date_from"),
+		DateTo:     r.URL.Query().Get("date_to"),
+		Today:      r.URL.Query().Get("today") == "1",
 	}
 
-	if deviceID > 0 {
-		conditions = append(conditions, fmt.Sprintf("al.device_id=$%d", argIdx))
-		args = append(args, deviceID)
-		argIdx++
+	// 校验日期格式
+	if filter.DateFrom != "" && !isValidDate(filter.DateFrom) {
+		writeJSON(w, http.StatusBadRequest, M{"error": "date_from 格式无效，请使用 YYYY-MM-DD 或 ISO 8601 格式"})
+		return
 	}
-	if buildingID > 0 {
-		conditions = append(conditions, fmt.Sprintf("d.building_id=$%d", argIdx))
-		args = append(args, buildingID)
-		argIdx++
-	}
-	if projectID > 0 {
-		conditions = append(conditions, fmt.Sprintf("b.project_id=$%d", argIdx))
-		args = append(args, projectID)
-		argIdx++
-	}
-	if today == "1" {
-		conditions = append(conditions, "al.created_at::date = CURRENT_DATE")
-	}
-	if dateFrom != "" {
-		conditions = append(conditions, fmt.Sprintf("al.created_at >= $%d::timestamp", argIdx))
-		args = append(args, dateFrom)
-		argIdx++
-	}
-	if dateTo != "" {
-		conditions = append(conditions, fmt.Sprintf("al.created_at <= $%d::timestamp", argIdx))
-		args = append(args, dateTo)
-		argIdx++
+	if filter.DateTo != "" && !isValidDate(filter.DateTo) {
+		writeJSON(w, http.StatusBadRequest, M{"error": "date_to 格式无效，请使用 YYYY-MM-DD 或 ISO 8601 格式"})
+		return
 	}
 
-	if len(conditions) > 0 {
-		baseQ += " WHERE " + conditions[0]
-		for i := 1; i < len(conditions); i++ {
-			baseQ += " AND " + conditions[i]
-		}
+	list, err := h.logRepo.List(r.Context(), filter)
+	if err != nil {
+		serverErr(w, err)
+		return
 	}
-	baseQ += " ORDER BY al.created_at DESC LIMIT 200"
-
-	rows, err = h.pool.Query(r.Context(), baseQ, args...)
-	if err != nil { serverErr(w, err); return }
-	defer rows.Close()
-	type alarmLog struct {
-		ID         int     `json:"id"`
-		DeviceID   int     `json:"device_id"`
-		DeviceName string  `json:"device_name"`
-		AlarmType  string  `json:"alarm_type"`
-		Level      string  `json:"level"`
-		Message    string  `json:"message"`
-		Value      string  `json:"value"`
-		Threshold  string  `json:"threshold"`
-		CreatedAt  *string `json:"created_at"`
-		AckAt      *string `json:"ack_at"`
+	if list == nil {
+		list = []postgres.AlarmLog{}
 	}
-	var list []alarmLog
-	for rows.Next() {
-		var l alarmLog
-		if err := rows.Scan(&l.ID, &l.DeviceID, &l.DeviceName, &l.AlarmType, &l.Level, &l.Message, &l.Value, &l.Threshold, &l.CreatedAt, &l.AckAt); err != nil {
-			slog.Warn("ListLogs scan failed", "err", err)
-			continue
-		}
-		if l.CreatedAt != nil && *l.CreatedAt == "" { l.CreatedAt = nil }
-		if l.AckAt != nil && *l.AckAt == "" { l.AckAt = nil }
-		list = append(list, l)
-	}
-	if list == nil { list = []alarmLog{} }
-	if err := rows.Err(); err != nil { serverErr(w, err); return }
 	ok(w, list)
 }
 
@@ -222,9 +149,9 @@ func (h *AlarmHandler) AckLog(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "未认证"})
 		return
 	}
-	if _, err := h.pool.Exec(r.Context(), "UPDATE alarm_log SET ack_by=$1, ack_at=NOW() WHERE id=$2", claims.Username, id); err != nil {
+	if err := h.logRepo.Ack(r.Context(), id, claims.Username); err != nil {
 		serverErr(w, err)
 		return
 	}
-	ok(w, M{"status":"acked"})
+	ok(w, M{"status": "acked"})
 }

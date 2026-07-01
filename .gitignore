@@ -26,3 +26,30 @@ Thumbs.db
 
 # Windows reserved names
 nul
+# Runtime artifacts
+screen-*.log
+srv.log
+srv_err.log
+server_err.log
+server_out.log
+server.exe
+
+# AI assistant artifacts (CLAUDE.md is canonical)
+AGENTS.md
+code-review-report-*.md
+
+# Miniapp build artifacts
+miniapp/dist/
+miniapp/npm_err.log
+miniapp/npm_out.log
+miniapp/stderr.log
+miniapp/stdout.log
+
+# Web admin runtime artifacts
+web/admin/npm_err.log
+web/admin/npm_out.log
+web/admin/stdout.log
+web/admin/stderr.log
+web/admin/screen-stderr.log
+web/admin/screen-stdout.log
+tools/modbus_sim.exe

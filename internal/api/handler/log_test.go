@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/pashagolub/pgxmock/v4"
+
+	"xmeco/internal/repository/postgres"
 )
 
 // =============================================================================
@@ -95,7 +97,7 @@ func TestLogHandler_Telemetry_IntervalWhitelist(t *testing.T) {
 				}
 				defer mock.Close()
 				tt.mockSetup(mock)
-				h = NewLogHandler(mock)
+				h = NewLogHandler(postgres.NewLogRepo(mock))
 			} else {
 				h = NewLogHandler(nil)
 			}

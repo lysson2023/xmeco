@@ -7,6 +7,19 @@ import (
 	"github.com/pashagolub/pgxmock/v4"
 )
 
+
+func generateDemoEfficiency() []EfficiencyItem {
+	return []EfficiencyItem{
+		{DeviceID: 0, DeviceName: "约克主机1", DeviceType: "主机", PowerKW: 105.3, LoadPct: 78, COP: 4.8, Efficiency: 80, Status: "良"},
+		{DeviceID: 0, DeviceName: "约克主机2", DeviceType: "主机", PowerKW: 98.7, LoadPct: 72, COP: 5.2, Efficiency: 87, Status: "优"},
+		{DeviceID: 0, DeviceName: "冷冻泵1", DeviceType: "冷冻泵", PowerKW: 22.5, LoadPct: 75, COP: 0, Efficiency: 85, Status: "优"},
+		{DeviceID: 0, DeviceName: "冷冻泵2", DeviceType: "冷冻泵", PowerKW: 24.1, LoadPct: 80, COP: 0, Efficiency: 82, Status: "良"},
+		{DeviceID: 0, DeviceName: "冷却泵1", DeviceType: "冷却泵", PowerKW: 18.3, LoadPct: 61, COP: 0, Efficiency: 78, Status: "良"},
+		{DeviceID: 0, DeviceName: "冷却泵2", DeviceType: "冷却泵", PowerKW: 19.6, LoadPct: 65, COP: 0, Efficiency: 76, Status: "良"},
+		{DeviceID: 0, DeviceName: "冷却塔1", DeviceType: "冷却塔", PowerKW: 5.2, LoadPct: 70, COP: 0, Efficiency: 88, Status: "优"},
+		{DeviceID: 0, DeviceName: "冷却塔2", DeviceType: "冷却塔", PowerKW: 5.8, LoadPct: 77, COP: 0, Efficiency: 84, Status: "良"},
+	}
+}
 func TestEstimateWetBulb(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -416,17 +429,8 @@ func TestAnalyzeEfficiencyNoDevices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) == 0 {
-		t.Fatal("expected demo items when no devices, got empty")
-	}
-	// Demo items should all have DeviceID=0
-	for _, item := range items {
-		if item.DeviceID != 0 {
-			t.Errorf("demo item DeviceID = %d, want 0", item.DeviceID)
-		}
-		if item.DeviceName == "" {
-			t.Error("demo item has empty DeviceName")
-		}
+	if len(items) != 0 {
+		t.Fatalf("expected empty list when no devices, got %d items", len(items))
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -528,7 +532,7 @@ func TestAnalyzeEfficiencyWithDevices(t *testing.T) {
 	// Telemetry query for power metrics
 	telCols := []string{"device_id", "value"}
 	mock.ExpectQuery(`SELECT DISTINCT ON \(device_id\) device_id, value`).
-		WithArgs("%功率%").
+		WithArgs(pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows(telCols).
 			AddRow(1, 105.0).  // chiller running ~75%
 			AddRow(2, 22.5))   // pump running ~75%

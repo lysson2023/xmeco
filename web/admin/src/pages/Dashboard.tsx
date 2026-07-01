@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, Col, Row, Statistic, Spin, Select, Table, Tag, Typography, message } from 'antd';
 import {
   ProjectOutlined, HomeOutlined, ApiOutlined, AlertOutlined,
@@ -9,50 +9,95 @@ import api from '../api/client';
 
 const { Title } = Typography;
 
+// ---- 类型定义 ----
+interface ProjectItem { id: number; name: string }
+
+interface WeatherInfo {
+  city: string; temp: number; text: string;
+  humidity: number; wind_dir: string; wind_scale: string;
+}
+
+interface TaskItem { time: string; device: string; enabled: boolean }
+
+interface ScreenData {
+  buildings?: unknown[];
+  devices?: unknown[];
+  saving_rate?: number;
+  power_saved?: number;
+  running_days?: number;
+  carbon_saved?: number;
+  meter_power?: number;
+  meters?: unknown[];
+  weather?: WeatherInfo;
+  tasks?: TaskItem[];
+}
+
+interface AlarmItem {
+  id: number; created_at: string; device_name: string;
+  message: string; level: string; ack_at: string | null;
+}
+
+interface StatsInfo {
+  tables?: number | string;
+  migrations?: number | string;
+  status?: string;
+  time?: string;
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [projects, setProjects] = useState<any[]>([]);
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [pid, setPid] = useState<number | null>(null);
-  const [data, setData] = useState<any>({});
+  const [data, setData] = useState<ScreenData>({});
 
   // Load project list
   useEffect(() => {
+    let cancelled = false;
     api.get('/projects').then(r => {
-      setProjects(r.data || []);
-    }).catch(() => { message.error('项目列表加载失败'); });
+      if (!cancelled) setProjects(r.data || []);
+    }).catch(() => { if (!cancelled) message.error('项目列表加载失败'); });
+    return () => { cancelled = true; };
   }, []);
 
   // Fetch screen data when project selected
   useEffect(() => {
     if (!pid) return;
+    let cancelled = false;
     setLoading(true);
     api.get('/screen/data', { params: { project_id: pid } })
-      .then(r => setData(r.data))
-      .catch(() => { message.error('大屏数据加载失败'); })
-      .finally(() => setLoading(false));
+      .then(r => { if (!cancelled) setData(r.data); })
+      .catch(() => { if (!cancelled) message.error('大屏数据加载失败'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [pid]);
 
-  // Fetch recent alarms
-  const [alarms, setAlarms] = useState<any[]>([]);
+  // Fetch recent alarms - 使用空依赖数组，只在组件挂载时执行一次
+  const [alarms, setAlarms] = useState<AlarmItem[]>([]);
   useEffect(() => {
+    let cancelled = false;
     api.get('/alarm-logs', { params: { today: '1' } })
       .then(r => {
-        const list = r.data || [];
-        setAlarms(Array.isArray(list) ? list : []);
+        if (!cancelled) {
+          const list = r.data || [];
+          setAlarms(Array.isArray(list) ? list : []);
+        }
       })
-      .catch(() => { message.error('告警日志加载失败'); });
+      .catch(() => { if (!cancelled) message.error('告警日志加载失败'); });
+    return () => { cancelled = true; };
   }, []);
 
-  // Fetch system stats (parallel, merged atomically to avoid race)
-  const [stats, setStats] = useState<any>({});
+  // Fetch system stats - 使用空依赖数组，只在组件挂载时执行一次
+  const [stats, setStats] = useState<StatsInfo>({});
   useEffect(() => {
+    let cancelled = false;
     Promise.all([
       api.get('/system/db-stats'),
       api.get('/system/info'),
     ]).then(([dbRes, infoRes]) => {
-      setStats({ ...dbRes.data, ...infoRes.data });
-    }).catch(() => { message.error('系统信息加载失败'); });
+      if (!cancelled) setStats({ ...dbRes.data, ...infoRes.data });
+    }).catch(() => { if (!cancelled) message.error('系统信息加载失败'); });
+    return () => { cancelled = true; };
   }, []);
 
   const buildingsCount = data.buildings?.length || 0;
@@ -60,7 +105,8 @@ export default function Dashboard() {
   const savingRate = data.saving_rate ? (data.saving_rate * 100).toFixed(1) : '--';
   const powerSaved = data.power_saved?.toFixed(1) || '0.0';
 
-  const alarmCols = useMemo(() => [
+  // alarmCols 是常量，不需要 useMemo
+  const alarmCols = [
     { title: '时间', dataIndex: 'created_at', key: 'time', width: 160, render: (v: string) => v?.slice(0, 16) },
     { title: '设备', dataIndex: 'device_name', key: 'device', width: 120 },
     { title: '信息', dataIndex: 'message', key: 'msg', ellipsis: true },
@@ -74,7 +120,7 @@ export default function Dashboard() {
     { title: '状态', dataIndex: 'ack_at', key: 'acked', width: 80,
       render: (v: string | null) => v ? <Tag color="green">已确认</Tag> : <Tag color="red">未确认</Tag>
     },
-  ], []);
+  ];
 
   return (
     <div>
@@ -113,7 +159,7 @@ export default function Dashboard() {
           <Card hoverable onClick={() => navigate('/alarms')}>
             <Statistic
               title="未确认告警"
-              value={alarms.filter((a: any) => !a.acked).length}
+              value={alarms.filter((a) => !a.ack_at).length}
               prefix={<AlertOutlined />}
               valueStyle={{ color: '#ff4d4f' }}
             />
@@ -187,7 +233,7 @@ export default function Dashboard() {
           rowKey="id"
           size="small"
           pagination={false}
-          onRow={(record) => ({
+          onRow={(_record) => ({
             onClick: () => navigate('/alarms'),
             style: { cursor: 'pointer' },
           })}

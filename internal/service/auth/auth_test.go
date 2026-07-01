@@ -55,7 +55,7 @@ func TestValidateToken(t *testing.T) {
 	}
 
 	// Validate
-	parsed, err := s.ValidateToken(tokenStr)
+	parsed, err := s.ValidateToken(t.Context(), tokenStr)
 	if err != nil {
 		t.Fatalf("ValidateToken failed: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestValidateTokenExpired(t *testing.T) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenStr, _ := token.SignedString([]byte(secret))
 
-	_, err := s.ValidateToken(tokenStr)
+	_, err := s.ValidateToken(t.Context(), tokenStr)
 	if err == nil {
 		t.Error("expected error for expired token, got nil")
 	}
@@ -110,7 +110,7 @@ func TestValidateTokenWrongSecret(t *testing.T) {
 	})
 	tokenStr, _ := token.SignedString([]byte("wrong-secret-key-here"))
 
-	_, err := s.ValidateToken(tokenStr)
+	_, err := s.ValidateToken(t.Context(), tokenStr)
 	if err == nil {
 		t.Error("expected error for wrong secret, got nil")
 	}
@@ -119,7 +119,7 @@ func TestValidateTokenWrongSecret(t *testing.T) {
 func TestValidateTokenMalformed(t *testing.T) {
 	s := New(nil, "test-secret")
 
-	_, err := s.ValidateToken("this.is.not.a.valid.token")
+	_, err := s.ValidateToken(t.Context(), "this.is.not.a.valid.token")
 	if err == nil {
 		t.Error("expected error for malformed token")
 	}
@@ -175,7 +175,7 @@ func TestCheckPassword(t *testing.T) {
 func TestValidateTokenEmpty(t *testing.T) {
 	s := New(nil, "test-secret")
 
-	_, err := s.ValidateToken("")
+	_, err := s.ValidateToken(t.Context(), "")
 	if err == nil {
 		t.Error("expected error for empty token")
 	}

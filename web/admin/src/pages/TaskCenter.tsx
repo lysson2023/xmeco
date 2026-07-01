@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { Table, Select, DatePicker, Button, Tabs, message, Space, Popconfirm, Modal, Form, Input, Switch, TimePicker, Tag, Row, Col } from 'antd';
 import { SearchOutlined, PlusOutlined, ClockCircleOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
@@ -20,7 +20,6 @@ export default function TaskCenter() {
   const [records, setRecords] = useState<any[]>([]);
   const [recLoading, setRecLoading] = useState(false);
   const [searchParams] = useSearchParams();
-  const mounted = useRef(false);
 
   // === Scheduled Tasks ===
   const [taskSelProject, setTaskSelProject] = useState<number | null>(null);
@@ -100,7 +99,7 @@ export default function TaskCenter() {
     if (exSelDevice) params += '&device_id=' + exSelDevice;
     api.get('/logs/controls' + params)
       .then(r => { setRecords(r.data); setRecLoading(false); })
-      .catch(() => setRecLoading(false));
+      .catch(() => { setRecLoading(false); message.error('控制记录加载失败'); });
   };
 
   // ---- Task CRUD ----
@@ -242,7 +241,7 @@ export default function TaskCenter() {
         <Button type="primary" icon={<SearchOutlined />} onClick={fetchRecords}>查询</Button>
         {exSelBuilding && <span style={{ paddingBottom: 2, color: '#006875', fontWeight: 500 }}>共{records.length}条记录</span>}
       </div>
-      <Table rowKey={(r: any, i: number) => `${r.created_at ?? i}-${r.device_name ?? ''}-${i}`}
+      <Table rowKey={(r: any, i: any) => `${r.created_at ?? i}-${r.device_name ?? ''}-${i}`}
         columns={recordCols} dataSource={records} loading={recLoading}
         scroll={{ x: 800 }} size="small"
         locale={{ emptyText: exSelBuilding ? '暂无控制记录' : '请先选择楼宇，点击查询' }} />

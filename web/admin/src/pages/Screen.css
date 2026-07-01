@@ -1,0 +1,100 @@
+/* ===== XMECO Big Screen — Glass Design System ===== */
+
+/* Header */
+.screen-header {
+  background: rgba(23,33,33,0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(1,218,243,0.12);
+}
+
+/* Tab bar */
+.screen-tab {
+  transition: all 0.25s ease;
+}
+.screen-tab:hover {
+  background: rgba(1,218,243,0.06);
+  color: #01daf3 !important;
+}
+
+/* Monitor panels */
+.screen-panel-glass {
+  background: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(149,209,208,0.1);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 10px;
+  transition: all 0.3s ease;
+}
+.screen-panel-glass:hover {
+  border-color: rgba(1,218,243,0.2);
+  box-shadow: 0 0 24px rgba(1,218,243,0.05);
+}
+
+/* Panel title */
+.screen-panel-title {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(1,218,243,0.75);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Weather hero */
+.screen-weather-temp {
+  font-family: 'Space Grotesk', monospace;
+  font-size: 40px;
+  font-weight: 700;
+  color: #01daf3;
+  letter-spacing: -0.03em;
+}
+
+/* Flow lines */
+@keyframes flowDash {
+  to { stroke-dashoffset: -20; }
+}
+.screen-flow-line {
+  stroke-dasharray: 10;
+  animation: flowDash 1s linear infinite;
+  filter: drop-shadow(0 0 4px rgba(1,218,243,0.6));
+}
+
+/* Topology node enhanced */
+.screen-topo-glow-online {
+  box-shadow: 0 0 12px rgba(127,255,212,0.3), 0 4px 16px rgba(0,0,0,0.2);
+}
+.screen-topo-glow-fault {
+  box-shadow: 0 0 14px rgba(255,77,79,0.4);
+}
+
+/* stat row */
+.screen-stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-family: 'Manrope', -apple-system, sans-serif;
+  font-size: 13px;
+}
+.screen-stat-row:last-child { border-bottom: none; }
+
+/* Alerts */
+.screen-alert-panel {
+  background: linear-gradient(135deg, rgba(255,77,79,0.06), rgba(255,77,79,0.01));
+  border: 1px solid rgba(255,77,79,0.15);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+/* Body font override */
+body.xmeco-dark {
+  font-family: 'Manrope', -apple-system, sans-serif;
+}

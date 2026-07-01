@@ -95,7 +95,7 @@ func (h *IntelligenceHandler) PriceConfig(w http.ResponseWriter, r *http.Request
 func (h *IntelligenceHandler) SavePriceConfig(w http.ResponseWriter, r *http.Request) {
 	var periods []intelligence.PricePeriod
 	if err := json.NewDecoder(r.Body).Decode(&periods); err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "请求格式错误"})
+		writeJSON(w, http.StatusBadRequest, errBadRequest)
 		return
 	}
 	if err := h.svc.SavePriceConfig(r.Context(), periods); err != nil {

@@ -1,18 +1,17 @@
-﻿package middleware
+package middleware
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"xmeco/internal/service/auth"
 )
 
-type contextKey string
+type contextKey struct{ name string }
 
-const (
-	CtxClaims contextKey = "claims"
-)
+var CtxClaims = contextKey{name: "claims"}
 
 func AuthMiddleware(authSvc *auth.Service) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -21,15 +20,19 @@ func AuthMiddleware(authSvc *auth.Service) func(http.Handler) http.Handler {
 		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error":"未提供认证令牌"}`))
+			if _, err := w.Write([]byte(`{"error":"未提供认证令牌"}`)); err != nil {
+				slog.Warn("auth middleware write failed", "err", err)
+			}
 			return
 		}
 		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-		claims, err := authSvc.ValidateToken(tokenStr)
+		claims, err := authSvc.ValidateToken(r.Context(), tokenStr)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error":"认证令牌无效或已过期"}`))
+			if _, err := w.Write([]byte(`{"error":"认证令牌无效或已过期"}`)); err != nil {
+				slog.Warn("auth middleware write failed", "err", err)
+			}
 			return
 		}
 			ctx := context.WithValue(r.Context(), CtxClaims, claims)

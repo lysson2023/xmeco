@@ -177,6 +177,9 @@ func (s *Service) loadPriceConfig(ctx context.Context) ([]PricePeriod, error) {
 
 // SavePriceConfig saves TOU pricing to DB.
 // Table electricity_price is created via migration 000011.
+// NOTE: electricity_price is a global (single-tenant) configuration table.
+// The DELETE + INSERT pattern replaces the entire pricing set atomically within a transaction.
+// TODO: If multi-tenant support is added, add a scope column (e.g., agent_id) and filter DELETE.
 func (s *Service) SavePriceConfig(ctx context.Context, periods []PricePeriod) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

@@ -29,15 +29,15 @@ export const QUICK_MODES = ['制冷', '制热', '除湿', '送风'] as const;
 export const TOPO_ORDER = ['冷却塔', '冷却泵', '主机', '阀门', '冷冻泵', '二次泵'] as const;
 
 export const TOPO_COLORS: Record<string, string> = {
-  '冷却塔': '#1677ff', '冷却泵': '#52c41a', '主机': '#fa8c16',
+  '冷却塔': '#0097a7', '冷却泵': '#52c41a', '主机': '#fa8c16',
   '阀门': '#722ed1', '冷冻泵': '#13c2c2', '二次泵': '#eb2f96',
 };
 
 export const DATA_ORDER = ['主机', '冷冻泵', '冷却泵', '冷却塔', '二次泵', '阀门', '电表', '温湿度传感器'] as const;
 
 export const DATA_COLORS: Record<string, string> = {
-  '主机': '#fa8c16', '冷冻泵': '#13c2c2', '冷却泵': '#52c41a', '冷却塔': '#1677ff',
+  '主机': '#fa8c16', '冷冻泵': '#13c2c2', '冷却泵': '#52c41a', '冷却塔': '#0097a7',
   '二次泵': '#eb2f96', '阀门': '#722ed1', '电表': '#ffc107', '温湿度传感器': '#00bcd4',
 };
 
-export const CHART_COLORS = ['#00daf3', '#52c41a', '#fa8c16', '#ff4d4f', '#722ed1', '#eb2f96', '#13c2c2', '#1677ff'] as const;
+export const CHART_COLORS = ['#00daf3', '#52c41a', '#fa8c16', '#ff4d4f', '#722ed1', '#eb2f96', '#13c2c2', '#0097a7'] as const;

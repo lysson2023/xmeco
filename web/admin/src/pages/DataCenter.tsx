@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Tabs, Select, DatePicker, Card, Spin, Empty, Tag, message, ConfigProvider } from 'antd';
+import { Select, DatePicker, Spin, Empty, Tag, message, ConfigProvider } from 'antd';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceArea,
@@ -19,7 +19,7 @@ import { DATA_ORDER, DATA_COLORS, CHART_COLORS } from '../utils/constants';
 
 // ---- Shared dark-theme styles ----
 const darkCard: React.CSSProperties = {
-  background: '#0d1f3c', borderRadius: 6, padding: 12, border: '1px solid #1a3455',
+  background: '#0d2525', borderRadius: 6, padding: 12, border: '1px solid #1a3535',
 };
 
 interface DataCenterProps {
@@ -35,15 +35,15 @@ export default function DataCenter({ pid, bid, devices }: DataCenterProps) {
     <ConfigProvider locale={locale} theme={{ token: { colorPrimary: '#00daf3' } }}>
     <div style={{ height: 'calc(100vh - 112px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Sub-tabs */}
-      <div style={{ display: 'flex', background: '#0d1f3c', borderBottom: '1px solid #1a3455', paddingLeft: 16 }}>
+      <div style={{ display: 'flex', background: '#0d2525', borderBottom: '1px solid #1a3535', paddingLeft: 16 }}>
         {[
           { key: 'realtime', icon: <ThunderboltOutlined />, label: '实时数据' },
           { key: 'history', icon: <HistoryOutlined />, label: '历史数据' },
         ].map(t => (
           <div key={t.key} onClick={() => setSubTab(t.key)} style={{
             padding: '10px 24px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-            background: subTab === t.key ? '#152d50' : 'transparent',
-            color: subTab === t.key ? '#00daf3' : '#8ba0c0',
+            background: subTab === t.key ? '#152a2a' : 'transparent',
+            color: subTab === t.key ? '#00daf3' : '#8ba0a0',
             borderBottom: subTab === t.key ? '2px solid #00daf3' : '2px solid transparent',
             fontWeight: subTab === t.key ? 700 : 400,
           }}>{t.icon} {t.label}</div>
@@ -54,7 +54,7 @@ export default function DataCenter({ pid, bid, devices }: DataCenterProps) {
       <div style={{ flex: 1, overflow: 'auto' }}>
         {subTab === 'realtime'
           ? <RealtimePanel pid={pid} bid={bid} devices={devices} />
-          : <HistoryPanel pid={pid} bid={bid} devices={devices} />
+          : <HistoryPanel bid={bid} devices={devices} />
         }
       </div>
     </div>
@@ -119,25 +119,25 @@ function RealtimePanel({ pid, bid, devices }: { pid: number; bid: number; device
   // 避免 30s 轮询导致 items 引用变化时 Tabs 内部重置 activeKey
 
   if (!bid) {
-    return <div style={{ textAlign: 'center', padding: 60, color: '#5a7a9a', fontSize: 15 }}>请先选择楼宇</div>;
+    return <div style={{ textAlign: 'center', padding: 60, color: '#5a7575', fontSize: 15 }}>请先选择楼宇</div>;
   }
 
   if (groupKeys.length === 0) {
-    return <Empty description={<span style={{ color: '#5a7a9a' }}>该楼宇暂无设备数据</span>} style={{ marginTop: 60 }} />;
+    return <Empty description={<span style={{ color: '#5a7575' }}>该楼宇暂无设备数据</span>} style={{ marginTop: 60 }} />;
   }
 
   // 确保 activeTab 仍然有效（防止设备列表变化后 activeTab 失效）
   const validTab = groupKeys.includes(activeTab) ? activeTab : groupKeys[0];
   const activeDevs = grouped[validTab] || [];
-  const activeColor = DATA_COLORS[validTab] || '#8ba0c0';
+  const activeColor = DATA_COLORS[validTab] || '#8ba0a0';
 
   return (
     <div style={{ padding: '8px 16px' }}>
       {/* 手动 Tab 栏 */}
-      <div style={{ display: 'flex', borderBottom: '1px solid #1a3455', marginBottom: 8, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', borderBottom: '1px solid #1a3535', marginBottom: 8, flexWrap: 'wrap' }}>
         {groupKeys.map((gkey) => {
           const devs = grouped[gkey];
-          const color = DATA_COLORS[gkey] || '#8ba0c0';
+          const color = DATA_COLORS[gkey] || '#8ba0a0';
           const isActive = validTab === gkey;
           return (
             <div
@@ -149,7 +149,7 @@ function RealtimePanel({ pid, bid, devices }: { pid: number; bid: number; device
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                color: isActive ? '#fff' : '#8ba0c0',
+                color: isActive ? '#fff' : '#8ba0a0',
                 fontWeight: isActive ? 700 : 400,
                 fontSize: 13,
                 borderBottom: isActive ? '2px solid #00daf3' : '2px solid transparent',
@@ -193,7 +193,6 @@ function DeviceCard({ device, properties, color }: { device: any; properties: an
     return () => { mounted = false; };
   }, [device.id]);
 
-  const statusColor = isFault ? '#ff4d4f' : isOnline && isOn ? '#52c41a' : isOnline ? '#faad14' : '#888';
   const statusText = isFault ? '故障' : isOnline ? (isOn ? '运行中' : '已停机') : '离线';
 
   // 温湿度传感器固定显示的五个属性
@@ -212,7 +211,7 @@ function DeviceCard({ device, properties, color }: { device: any; properties: an
     }}>
       {/* Device header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ color: '#c0d0e0', fontWeight: 700, fontSize: 14 }}>{device.name}</span>
+        <span style={{ color: '#c0d5d0', fontWeight: 700, fontSize: 14 }}>{device.name}</span>
         <Tag color={isFault ? 'red' : isOnline ? (isOn ? 'green' : 'gold') : 'default'} style={{ fontSize: 10, margin: 0 }}>
           {statusText}
         </Tag>
@@ -222,21 +221,21 @@ function DeviceCard({ device, properties, color }: { device: any; properties: an
       {isSensor ? (
         // 温湿度传感器：固定显示温度/湿度/电压/信号强度/时间间隔
         sensorRows.length === 0 ? (
-          <div style={{ color: '#5a7a9a', fontSize: 12, textAlign: 'center', padding: 8 }}>加载中...</div>
+          <div style={{ color: '#5a7575', fontSize: 12, textAlign: 'center', padding: 8 }}>加载中...</div>
         ) : (
           sensorRows.map((row, i) => (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid rgba(26,52,85,0.5)', fontSize: 12 }}>
-              <span style={{ color: '#8ba0c0', flex: '0 0 auto', maxWidth: '55%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</span>
+              <span style={{ color: '#8ba0a0', flex: '0 0 auto', maxWidth: '55%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</span>
               <span style={{ color: '#00daf3', fontWeight: 600, textAlign: 'right', flex: 1 }}>{row.value}</span>
             </div>
           ))
         )
       ) : properties.length === 0 ? (
-        <div style={{ color: '#5a7a9a', fontSize: 12, textAlign: 'center', padding: 8 }}>暂无属性配置</div>
+        <div style={{ color: '#5a7575', fontSize: 12, textAlign: 'center', padding: 8 }}>暂无属性配置</div>
       ) : (
         properties.map((p: any) => (
           <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid rgba(26,52,85,0.5)', fontSize: 12 }}>
-            <span style={{ color: '#8ba0c0', flex: '0 0 auto', maxWidth: '55%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.prop_name}</span>
+            <span style={{ color: '#8ba0a0', flex: '0 0 auto', maxWidth: '55%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.prop_name}</span>
             <span style={{ color: '#00daf3', fontWeight: 600, textAlign: 'right', flex: 1 }}>
               {p.prop_value || '-'}{p.unit ? ` ${p.unit}` : ''}
             </span>
@@ -248,7 +247,7 @@ function DeviceCard({ device, properties, color }: { device: any; properties: an
 }
 
 // ======================== HISTORY PANEL ========================
-function HistoryPanel({ pid, bid, devices }: { pid: number; bid: number; devices: any[] }) {
+function HistoryPanel({ bid, devices }: { bid: number; devices: any[] }) {
   const [selDevice, setSelDevice] = useState<number | null>(null);
   const [dateRange, setDateRange] = useState<[any, any]>([dayjs().startOf('day'), dayjs()]);
   const [loading, setLoading] = useState(false);
@@ -342,7 +341,7 @@ function HistoryPanel({ pid, bid, devices }: { pid: number; bid: number; devices
   };
 
   if (!bid) {
-    return <div style={{ textAlign: 'center', padding: 60, color: '#5a7a9a', fontSize: 15 }}>请先选择楼宇</div>;
+    return <div style={{ textAlign: 'center', padding: 60, color: '#5a7575', fontSize: 15 }}>请先选择楼宇</div>;
   }
 
   return (
@@ -350,7 +349,7 @@ function HistoryPanel({ pid, bid, devices }: { pid: number; bid: number; devices
       {/* Controls */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <div>
-          <div style={{ color: '#8ba0c0', fontSize: 11, marginBottom: 2 }}>设备</div>
+          <div style={{ color: '#8ba0a0', fontSize: 11, marginBottom: 2 }}>设备</div>
           <Select
             style={{ width: 180 }}
             placeholder="选择设备"
@@ -360,18 +359,18 @@ function HistoryPanel({ pid, bid, devices }: { pid: number; bid: number; devices
           />
         </div>
         <div>
-          <div style={{ color: '#8ba0c0', fontSize: 11, marginBottom: 2 }}>时间范围</div>
+          <div style={{ color: '#8ba0a0', fontSize: 11, marginBottom: 2 }}>时间范围</div>
           <DatePicker.RangePicker
             value={dateRange as any}
             onChange={(v: any) => v && setDateRange(v)}
             showTime={{ format: 'HH:mm' }}
             format="YYYY-MM-DD HH:mm"
             locale={locale.DatePicker}
-            style={{ background: '#0d1f3c', border: '1px solid #1a3455' }}
+            style={{ background: '#0d2525', border: '1px solid #1a3535' }}
           />
         </div>
         {selDevice && (
-          <span style={{ color: '#8ba0c0', fontSize: 13, paddingTop: 18 }}>
+          <span style={{ color: '#8ba0a0', fontSize: 13, paddingTop: 18 }}>
             <ClockCircleOutlined /> {deviceName}
           </span>
         )}
@@ -380,11 +379,11 @@ function HistoryPanel({ pid, bid, devices }: { pid: number; bid: number; devices
       {/* Metric selectors */}
       {metrics.length > 0 && (
         <div style={{ marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-          <span style={{ color: '#8ba0c0', fontSize: 12, marginRight: 4 }}>指标:</span>
+          <span style={{ color: '#8ba0a0', fontSize: 12, marginRight: 4 }}>指标:</span>
           {metrics.map((m) => (
             <Tag
               key={m}
-              color={selectedMetrics.includes(m) ? 'blue' : 'default'}
+              color={selectedMetrics.includes(m) ? 'cyan' : 'default'}
               style={{ cursor: 'pointer', fontSize: 11 }}
               onClick={() => toggleMetric(m)}
             >
@@ -398,32 +397,32 @@ function HistoryPanel({ pid, bid, devices }: { pid: number; bid: number; devices
       {loading ? (
         <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" /></div>
       ) : !selDevice ? (
-        <div style={{ textAlign: 'center', padding: 60, color: '#5a7a9a', fontSize: 15 }}>请选择设备查看历史数据</div>
+        <div style={{ textAlign: 'center', padding: 60, color: '#5a7575', fontSize: 15 }}>请选择设备查看历史数据</div>
       ) : chartData.length === 0 ? (
-        <Empty description={<span style={{ color: '#5a7a9a' }}>该时间段暂无数据</span>} style={{ marginTop: 40 }} />
+        <Empty description={<span style={{ color: '#5a7575' }}>该时间段暂无数据</span>} style={{ marginTop: 40 }} />
       ) : (
         <div style={{ ...darkCard, padding: 16 }}>
           {/* On/Off status summary */}
           {onOffSegments.length > 0 && (
             <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
-              <span style={{ color: '#8ba0c0' }}>运行时段:</span>
+              <span style={{ color: '#8ba0a0' }}>运行时段:</span>
               {onOffSegments.slice(0, 8).map((seg: any, i: number) => (
                 <Tag key={i} color={seg.type === 'on' ? 'green' : 'red'} style={{ fontSize: 10 }}>
                   {seg.type === 'on' ? <CheckCircleOutlined /> : <MinusCircleOutlined />}
                   {' '}{seg.start} ~ {seg.end}
                 </Tag>
               ))}
-              {onOffSegments.length > 8 && <span style={{ color: '#5a7a9a' }}>+{onOffSegments.length - 8}段</span>}
+              {onOffSegments.length > 8 && <span style={{ color: '#5a7575' }}>+{onOffSegments.length - 8}段</span>}
             </div>
           )}
 
           <ResponsiveContainer width="100%" height={380}>
             <LineChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1a3455" />
-              <XAxis dataKey="ts" stroke="#5a7a9a" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-              <YAxis stroke="#5a7a9a" tick={{ fontSize: 10 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#1a3535" />
+              <XAxis dataKey="ts" stroke="#5a7575" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+              <YAxis stroke="#5a7575" tick={{ fontSize: 10 }} />
               <Tooltip
-                contentStyle={{ background: '#0d1f3c', border: '1px solid #1a3455', borderRadius: 6, color: '#c0d0e0', fontSize: 12 }}
+                contentStyle={{ background: '#0d2525', border: '1px solid #1a3535', borderRadius: 6, color: '#c0d5d0', fontSize: 12 }}
                 labelStyle={{ color: '#00daf3', fontWeight: 600 }}
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
